@@ -1,6 +1,10 @@
 const clientEnv = {
   NEXT_PUBLIC_REDDIT_CLIENT_ID: process.env.NEXT_PUBLIC_REDDIT_CLIENT_ID ?? '',
-  NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001',
+  NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL ?? (
+    process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:3001'
+  ),
 };
 
 const serverEnv = {

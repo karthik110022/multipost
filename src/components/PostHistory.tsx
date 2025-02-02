@@ -1,21 +1,21 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useUser } from '@supabase/auth-helpers-react';
+import { useAuth } from '@/context/AuthContext';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'react-hot-toast';
-import { createClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
 import { SocialMediaService } from '@/lib/social-media-service';
 import type { PostHistory as PostHistoryType } from '@/lib/social-media-service';
 
 // Create Supabase client
-const supabase = createClient(
+const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 export function PostHistory() {
-  const user = useUser();
+  const { user } = useAuth();
   const [posts, setPosts] = useState<PostHistoryType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

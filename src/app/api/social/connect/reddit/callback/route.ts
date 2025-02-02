@@ -1,4 +1,4 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { RedditService } from '@/lib/reddit-service';
@@ -22,7 +22,25 @@ export async function GET(request: Request) {
 
   try {
     // Get the user from Supabase auth
-    const supabase = createRouteHandlerClient({ cookies });
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value;
+          },
+          set(name: string, value: string, options: CookieOptions) {
+            cookieStore.set(name, value, options);
+          },
+          remove(name: string, options: CookieOptions) {
+            cookieStore.set(name, '', options);
+          },
+        },
+      }
+    );
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -33,36 +51,41 @@ export async function GET(request: Request) {
       );
     }
 
-    // Exchange the code for tokens
+    // Exchange code for tokens
     const redditService = new RedditService();
     const tokens = await redditService.exchangeCode(code);
 
-    // Get user info from Reddit
+    // Get Reddit user info
     const userInfo = await redditService.getUserInfo(tokens.access_token);
 
-    // Store the connection in Supabase
-    const { error: dbError } = await supabase.from('social_accounts').upsert({
-      user_id: user.id,
-      platform: 'reddit',
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      token_expires: new Date(tokens.expires_at).toISOString(),
-      account_name: userInfo.name,
-      account_id: userInfo.id,
-    });
+    // Store the connection in the database
+    const { error: dbError } = await supabase
+      .from('social_accounts')
+      .insert({
+        user_id: user.id,
+        platform: 'reddit',
+        account_name: userInfo.name,
+        account_id: userInfo.id,
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        expires_at: tokens.expires_at,
+      });
 
     if (dbError) {
-      throw dbError;
+      console.error('Error storing Reddit connection:', dbError);
+      return NextResponse.redirect(
+        `${process.env.NEXT_PUBLIC_APP_URL}/accounts?error=connection_failed`
+      );
     }
 
-    // Redirect back to accounts page
     return NextResponse.redirect(
       `${process.env.NEXT_PUBLIC_APP_URL}/accounts?success=true`
     );
   } catch (error) {
     console.error('Error connecting Reddit account:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/accounts?error=connection_failed`
+      `${process.env.NEXT_PUBLIC_APP_URL}/accounts?error=${encodeURIComponent(errorMessage)}`
     );
   }
 }

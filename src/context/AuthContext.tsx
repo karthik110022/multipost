@@ -2,22 +2,22 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import type { User } from '@supabase/auth-helpers-nextjs';
+import { createBrowserClient } from '@supabase/ssr';
+import type { User, AuthError, Session } from '@supabase/supabase-js';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signUp: (email: string, password: string) => Promise<{ error: any }>;
-  signIn: (email: string, password: string) => Promise<{ error: any }>;
+  signUp: (email: string, password: string) => Promise<{ error: AuthError | null }>;
+  signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  signUp: async () => ({ error: new Error('Not implemented') }),
-  signIn: async () => ({ error: new Error('Not implemented') }),
+  signUp: async () => ({ error: new Error('Not implemented') as AuthError }),
+  signIn: async () => ({ error: new Error('Not implemented') as AuthError }),
   signOut: async () => {},
 });
 
@@ -29,78 +29,77 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
-  const supabase = createClientComponentClient();
+
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
   useEffect(() => {
-    let mounted = true;
+    // Check active sessions and sets the user
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
 
-    const initializeAuth = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (mounted) {
-          setUser(session?.user ?? null);
-        }
-      } catch (error) {
-        console.error('Error checking auth session:', error);
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    initializeAuth();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (mounted) {
-        setUser(session?.user ?? null);
-        if (event === 'SIGNED_IN') {
-          router.push('/dashboard');
-        } else if (event === 'SIGNED_OUT') {
-          router.push('/auth/signin');
-        }
-      }
+    // Listen for changes in auth state
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event: string, session: Session | null) => {
+      setUser(session?.user ?? null);
+      setLoading(false);
     });
 
     return () => {
-      mounted = false;
       subscription.unsubscribe();
     };
-  }, [router, supabase.auth]);
+  }, []);
 
   const signUp = async (email: string, password: string) => {
-    try {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
-      return { error };
-    } catch (error) {
-      return { error };
-    }
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+    return { error };
   };
 
   const signIn = async (email: string, password: string) => {
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
+      
+      if (error) {
+        console.error('Sign in error:', error);
+      } else if (data?.user) {
+        router.push('/dashboard');
+      }
+      
       return { error };
-    } catch (error) {
-      return { error };
+    } catch (err) {
+      console.error('Unexpected error during sign in:', err);
+      return { 
+        error: new Error('An unexpected error occurred during sign in') as AuthError 
+      };
     }
   };
 
   const signOut = async () => {
     await supabase.auth.signOut();
+    router.push('/auth/signin');
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signUp, signIn, signOut }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        signUp,
+        signIn,
+        signOut,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

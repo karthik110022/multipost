@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { createBrowserClient } from '@supabase/ssr';
 import { useAuth } from '@/context/AuthContext';
-import { socialMediaService, type SocialAccount } from '@/lib/social-media-service';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { socialMediaService } from '@/lib/social-media-service';
+import type { SocialAccount } from '@/lib/social-media-service';
 import RedditConnectModal from './RedditConnectModal';
 import { useSearchParams, usePathname, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast'; // Assuming you have react-hot-toast installed
@@ -11,13 +12,17 @@ import toast from 'react-hot-toast'; // Assuming you have react-hot-toast instal
 export default function ConnectAccounts() {
   const { user } = useAuth();
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
-  const supabase = createClientComponentClient();
+
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
   useEffect(() => {
     if (user) {

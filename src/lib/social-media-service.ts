@@ -1,4 +1,4 @@
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createBrowserClient } from '@supabase/ssr';
 import { RedditService } from './reddit-service';
 
 export interface SocialAccount {
@@ -44,7 +44,10 @@ export class SocialMediaService {
 
   constructor(supabase?: any) {
     this.redditService = new RedditService();
-    this.supabase = supabase || createClientComponentClient();
+    this.supabase = supabase || createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
   }
 
   getRedditAuthUrl(): string {
@@ -374,17 +377,14 @@ export class SocialMediaService {
           status,
           error_message,
           published_at,
-          social_account (
+          social_accounts (
             id,
             platform,
             account_name,
             account_id
           ),
-          post: posts (
-            content,
-            title,
-            subreddit,
-            media_urls
+          post:posts (
+            content
           )
         `)
         .order('published_at', { ascending: false });
@@ -398,52 +398,20 @@ export class SocialMediaService {
         return [];
       }
 
-      interface RawPost {
-        id: string;
-        post_id: string;
-        social_account_id: string;
-        platform_post_id: string;
-        status: 'pending' | 'published' | 'failed';
-        error_message: string;
-        published_at: string;
-        social_account: {
-          id: string;
-          platform: 'reddit';
-          account_name: string;
-          account_id: string;
-        };
-        post: {
-          content: string;
-          title: string;
-          subreddit: string;
-          media_urls: string[];
-        };
-      }
-
-      return (posts as RawPost[]).map(post => {
-        const account = post.social_account;
-        const postContent = post.post;
-
-        return {
-          id: post.post_id,
-          content: postContent.content,
-          status: post.status,
-          errorMessage: post.error_message,
-          createdAt: post.published_at,
-          publishedAt: post.published_at,
-          externalPostId: post.platform_post_id,
-          postUrl: `https://reddit.com/${post.platform_post_id}`,
-          account: account ? {
-            id: account.id,
-            platform: account.platform,
-            accountName: account.account_name,
-            accountId: account.account_id
-          } : undefined,
-          title: postContent.title,
-          subreddit: postContent.subreddit,
-          media_urls: postContent.media_urls
-        };
-      });
+      return posts.map((post: any) => ({
+        id: post.id,
+        content: post.post?.content || '',
+        status: post.status,
+        errorMessage: post.error_message,
+        publishedAt: post.published_at,
+        externalPostId: post.platform_post_id,
+        account: post.social_accounts ? {
+          id: post.social_accounts.id,
+          platform: post.social_accounts.platform,
+          accountName: post.social_accounts.account_name,
+          accountId: post.social_accounts.account_id
+        } : undefined
+      }));
     } catch (error) {
       console.error('Error fetching post history:', error);
       return [];

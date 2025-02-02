@@ -1,4 +1,4 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { RedditService } from '@/lib/reddit-service';
 import { redirect } from 'next/navigation';
@@ -20,12 +20,28 @@ export default async function RedditCallback({
 
   try {
     // Get the user from Supabase auth
-    const supabase = createServerComponentClient({ cookies });
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value;
+          },
+          set(name: string, value: string, options: any) {
+            cookieStore.set(name, value, options);
+          },
+          remove(name: string, options: any) {
+            cookieStore.set(name, '', options);
+          },
+        },
+      }
+    );
 
-    if (!user) {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
       redirect('/auth/signin?error=auth_required');
     }
 
@@ -38,7 +54,7 @@ export default async function RedditCallback({
 
     // Store the connection in Supabase
     const { error: dbError } = await supabase.from('social_accounts').upsert({
-      user_id: user.id,
+      user_id: session.user.id,
       platform: 'reddit',
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,

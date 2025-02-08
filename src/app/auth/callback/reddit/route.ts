@@ -38,7 +38,7 @@ export async function GET(request: Request) {
             cookieStore.set(name, value, options);
           },
           remove(name: string, options: any) {
-            cookieStore.delete(name, options);
+            cookieStore.delete({ name, ...options });
           },
         },
       }

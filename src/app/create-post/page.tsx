@@ -24,16 +24,16 @@ export default async function CreatePost() {
     }
   );
 
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     redirect('/auth/signin');
   }
 
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-2xl font-bold mb-8">Create Post</h1>
-      <PostForm user={session.user} />
+      <PostForm user={user} />
     </div>
   );
 }

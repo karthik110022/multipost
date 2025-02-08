@@ -24,9 +24,9 @@ export async function GET(request: Request) {
       }
     );
 
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { user } } = await supabase.auth.getUser();
 
-    if (!session) {
+    if (!user) {
       return new NextResponse(
         JSON.stringify({ error: 'Authentication required' }),
         { status: 401 }

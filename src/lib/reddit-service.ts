@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { env, validateEnv } from '@/config/env';
 
 class RateLimiter {
@@ -239,7 +239,7 @@ export class RedditService {
 
   private async handleApiError(error: unknown, context: string): Promise<never> {
     if (error && typeof error === 'object' && 'response' in error) {
-      const axiosError = error as { response?: { status: number; headers: Record<string, string>; }; };
+      const axiosError = error as AxiosError;
 
       if (axiosError.response?.status === 429) {
         const retryAfter = parseInt(axiosError.response.headers['retry-after'] || '60', 10);
@@ -424,60 +424,53 @@ export class RedditService {
     flairId?: string,
     imageUrl?: string
   ): Promise<string> {
+    console.log('Starting post submission...', {
+      subreddit,
+      hasFlairId: !!flairId,
+      hasImageUrl: !!imageUrl
+    });
+
     try {
-      // First check if the subreddit requires flairs
-      const flairs = await this.getFlairOptions(accessToken, subreddit);
+      const formData = new URLSearchParams();
+      formData.append('sr', subreddit);
+      formData.append('title', title);
+      formData.append('kind', 'self');
+      formData.append('text', content);
       
-      // If flairs exist but none was provided, throw an error
-      if (flairs.length > 0 && !flairId) {
-        throw new Error(`Flair is required for r/${subreddit}. Available flairs: ${flairs.map(f => f.text).join(', ')}`);
+      if (flairId) {
+        formData.append('flair_id', flairId);
       }
 
-      console.log(`Posting to Reddit - Subreddit: ${subreddit}`);
-
-      // Prepare the form data
-      const formData = new URLSearchParams({
-        sr: subreddit,
-        kind: imageUrl ? 'image' : 'self',
-        title: title,
-        ...(imageUrl ? { url: imageUrl } : { text: content }),
-        ...(flairId ? { flair_id: flairId } : {}),
-        api_type: 'json'
+      console.log('Submitting post to Reddit API...');
+      const response = await this.makeApiRequest<RedditSubmitResponse>('/api/v1/submit', {
+        method: 'POST',
+        data: formData,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        accessToken,
       });
 
-      const response = await axios.post<RedditApiResponse>(
-        'https://oauth.reddit.com/api/submit',
-        formData.toString(),
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        }
-      );
+      console.log('Post submission response:', response);
 
-      // Check for errors in the response
-      if (!response.data || !response.data.json) {
-        throw new Error('Invalid response from Reddit API');
-      }
-
-      if (response.data.json.errors && response.data.json.errors.length > 0) {
-        const errorMessage = response.data.json.errors[0][1] || 'Unknown error occurred';
+      if (response.json.errors && response.json.errors.length > 0) {
+        const errorMessage = response.json.errors[0][1] || 'Unknown error occurred';
+        console.error('Reddit submission failed:', errorMessage);
         throw new Error(`Reddit submission failed: ${errorMessage}`);
       }
 
-      if (!response.data.json.data) {
-        throw new Error('No data returned from Reddit API');
+      if (!response.json.data?.url) {
+        console.error('No URL in response:', response);
+        throw new Error('Failed to get post URL from Reddit response');
       }
 
-      return response.data.json.data.name || '';
+      console.log('Post submitted successfully:', response.json.data.url);
+      return response.json.data.url;
     } catch (error: any) {
-      console.error('Error submitting post:', error);
-      if (error.response?.data?.message) {
-        throw new Error(error.response.data.message);
-      }
-      if (error.response?.data?.json?.errors?.[0]?.[1]) {
-        throw new Error(error.response.data.json.errors[0][1]);
+      if (axios.isAxiosError(error)) {
+        console.error('Error in submitPost:', error.response?.data || error.message);
+      } else {
+        console.error('Error in submitPost:', error);
       }
       throw error;
     }
@@ -502,28 +495,47 @@ export class RedditService {
 
   async exchangeCode(code: string): Promise<RedditTokens> {
     console.log('Exchanging code for tokens...');
+    const params = new URLSearchParams();
+    params.append('grant_type', 'authorization_code');
+    params.append('code', code);
+    params.append('redirect_uri', `${env.NEXT_PUBLIC_APP_URL}/auth/callback/reddit`);
+
     try {
-      this.validateCredentials();
-      const response = await this.makeApiRequest<RedditTokenResponse>('/api/v1/access_token', {
-        method: 'POST',
-        data: {
-          grant_type: 'authorization_code',
-          code,
-          redirect_uri: this.redirectUri
-        },
-        headers: {
-          'Authorization': `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`
+      console.log('Making token request to Reddit...');
+      const response = await axios.post<RedditTokenResponse>(
+        'https://www.reddit.com/api/v1/access_token',
+        params,
+        {
+          auth: {
+            username: this.clientId,
+            password: this.clientSecret,
+          },
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
         }
+      );
+
+      console.log('Token response received:', { 
+        status: response.status,
+        hasAccessToken: !!response.data.access_token,
+        hasRefreshToken: !!response.data.refresh_token,
+        expiresIn: response.data.expires_in
       });
 
-      console.log('Token exchange successful');
+      const { access_token, refresh_token, expires_in } = response.data;
       return {
-        access_token: response.access_token,
-        refresh_token: response.refresh_token || '',
-        expires_at: Date.now() + (response.expires_in * 1000),
+        access_token,
+        refresh_token: refresh_token || '',
+        expires_at: Date.now() + expires_in * 1000,
       };
-    } catch (error) {
-      return this.handleApiError(error, 'exchange code');
+    } catch (error: any) {
+      if (axios.isAxiosError(error)) {
+        console.error('Error exchanging code:', error.response?.data || error.message);
+      } else {
+        console.error('Error exchanging code:', error);
+      }
+      throw error;
     }
   }
 

@@ -433,43 +433,21 @@ export class RedditService {
         throw new Error(`Flair is required for r/${subreddit}. Available flairs: ${flairs.map(f => f.text).join(', ')}`);
       }
 
-      // If an image URL is provided, create an image post
-      if (imageUrl) {
-        const response = await axios.post<RedditApiResponse>(
-          'https://oauth.reddit.com/api/submit',
-          {
-            sr: subreddit,
-            kind: 'image',
-            title,
-            url: imageUrl,
-            ...(content ? { text: content } : {}),
-            ...(flairId ? { flair_id: flairId } : {}),
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-          }
-        );
+      console.log(`Posting to Reddit - Subreddit: ${subreddit}`);
 
-        if (response.data.json.errors?.length > 0) {
-          throw new Error(response.data.json.errors[0][1]);
-        }
+      // Prepare the form data
+      const formData = new URLSearchParams({
+        sr: subreddit,
+        kind: imageUrl ? 'image' : 'self',
+        title: title,
+        ...(imageUrl ? { url: imageUrl } : { text: content }),
+        ...(flairId ? { flair_id: flairId } : {}),
+        api_type: 'json'
+      });
 
-        return response.data.json.data?.name || '';
-      }
-
-      // Otherwise, create a text post
       const response = await axios.post<RedditApiResponse>(
         'https://oauth.reddit.com/api/submit',
-        {
-          sr: subreddit,
-          kind: 'self',
-          title,
-          text: content,
-          ...(flairId ? { flair_id: flairId } : {}),
-        },
+        formData.toString(),
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -478,15 +456,28 @@ export class RedditService {
         }
       );
 
-      if (response.data.json.errors?.length > 0) {
-        throw new Error(response.data.json.errors[0][1]);
+      // Check for errors in the response
+      if (!response.data || !response.data.json) {
+        throw new Error('Invalid response from Reddit API');
       }
 
-      return response.data.json.data?.name || '';
+      if (response.data.json.errors && response.data.json.errors.length > 0) {
+        const errorMessage = response.data.json.errors[0][1] || 'Unknown error occurred';
+        throw new Error(`Reddit submission failed: ${errorMessage}`);
+      }
+
+      if (!response.data.json.data) {
+        throw new Error('No data returned from Reddit API');
+      }
+
+      return response.data.json.data.name || '';
     } catch (error: any) {
       console.error('Error submitting post:', error);
       if (error.response?.data?.message) {
         throw new Error(error.response.data.message);
+      }
+      if (error.response?.data?.json?.errors?.[0]?.[1]) {
+        throw new Error(error.response.data.json.errors[0][1]);
       }
       throw error;
     }
@@ -537,25 +528,20 @@ export class RedditService {
   }
 
   getAuthUrl(): string {
-    const scopes = [
-      'identity',
-      'submit',
-      'read',
-      'subscribe',
-      'mysubreddits',
-      'flair'
-    ];
-
-    const params = new URLSearchParams({
+    this.validateCredentials();
+    const params = {
       client_id: this.clientId,
       response_type: 'code',
       state: 'random_state',
-      redirect_uri: this.redirectUri,
+      redirect_uri: `${env.NEXT_PUBLIC_APP_URL}/auth/callback/reddit`,
       duration: 'permanent',
-      scope: scopes.join(' ')
-    });
+      scope: 'identity submit read subscribe mysubreddits flair'
+    };
 
-    return `https://www.reddit.com/api/v1/authorize?${params.toString()}`;
+    // Log the redirect URI for debugging
+    console.log('Redirect URI:', params.redirect_uri);
+
+    return `https://www.reddit.com/api/v1/authorize?${new URLSearchParams(params).toString()}`;
   }
 
   async getUserInfo(accessToken: string): Promise<{ name: string; id: string }> {

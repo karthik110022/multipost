@@ -188,11 +188,18 @@ export class SocialMediaService {
       
       const results: PostResult[] = [];
 
-      // First create the post record
+      // Get the authenticated user
+      const { data: { user }, error: userError } = await this.supabase.auth.getUser();
+      
+      if (userError || !user) {
+        throw new Error('User not authenticated');
+      }
+
+      // Create the post record with the authenticated user's ID
       const { data: post, error: postError } = await this.supabase
         .from('posts')
         .insert({
-          user_id: accountIds[0], // Using first account's user_id
+          user_id: user.id,
           content: content,
           media_urls: imageUrl ? [imageUrl] : [],
           created_at: new Date().toISOString()

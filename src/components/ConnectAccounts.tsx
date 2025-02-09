@@ -45,13 +45,12 @@ export default function ConnectAccounts() {
   };
 
   const handleRedditConnect = () => {
-    try {
-      const authUrl = socialMediaService.getRedditAuthUrl();
-      window.location.href = authUrl;
-    } catch (error) {
-      console.error('Error connecting to Reddit:', error);
-      toast.error('Reddit configuration is missing. Please contact support.');
-    }
+    setError(null);
+    // Store current timestamp to detect if we're returning from Reddit
+    localStorage.setItem('lastRedditConnect', Date.now().toString());
+    const authUrl = socialMediaService.getRedditAuthUrl();
+    // Open Reddit auth in a new window
+    window.open(authUrl, '_blank', 'width=600,height=800');
   };
 
   const handleDisconnect = async (accountId: string) => {
@@ -62,6 +61,18 @@ export default function ConnectAccounts() {
     } catch (error) {
       console.error('Error disconnecting account:', error);
       setError('Failed to disconnect account');
+    }
+  };
+
+  const handleSetActiveAccount = async (accountId: string) => {
+    try {
+      setError(null);
+      await socialMediaService.setActiveAccount(accountId);
+      await loadAccounts(); // Reload to update UI
+      toast.success('Active account updated successfully');
+    } catch (error) {
+      console.error('Error setting active account:', error);
+      setError('Failed to set active account');
     }
   };
 
@@ -92,66 +103,100 @@ export default function ConnectAccounts() {
         <div className="p-6">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-semibold text-gray-900">
-              Reddit Accounts ({accounts.length})
+              Reddit Accounts ({accounts.filter(a => a.platform === 'reddit').length})
             </h2>
             <button
               onClick={handleRedditConnect}
-              className="px-4 py-2 bg-[#FF4500] text-white rounded-md hover:bg-[#FF5722] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#FF4500]"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm"
             >
               Connect New Account
             </button>
           </div>
 
-          {accounts.length === 0 ? (
-            <div className="text-center py-6">
-              <div className="mb-4">
-                <svg
-                  className="mx-auto h-12 w-12 text-gray-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 4v16m8-8H4"
-                  />
-                </svg>
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-semibold">Connected Accounts</h2>
+              <button
+                onClick={handleRedditConnect}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm"
+              >
+                Connect New Account
+              </button>
+            </div>
+            {error && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-md">
+                {error}
               </div>
-              <p className="text-gray-500">No Reddit accounts connected yet.</p>
-              <p className="text-sm text-gray-400 mt-1">
-                Click the button above to connect your first account.
-              </p>
+            )}
+            <div className="bg-yellow-50 text-yellow-800 p-4 rounded-md mb-4">
+              <p className="font-medium">To connect a different Reddit account:</p>
+              <ol className="list-decimal list-inside mt-2 space-y-1">
+                <li>Log out of your current Reddit account in a new tab</li>
+                <li>Click "Connect New Account" above</li>
+                <li>Log in with the different Reddit account you want to connect</li>
+              </ol>
             </div>
-          ) : (
-            <div className="space-y-4">
-              {accounts.map((account) => (
-                <div
-                  key={account.id}
-                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className="flex-shrink-0">
-                      <svg className="h-6 w-6 text-[#FF4500]" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M10 0C4.478 0 0 4.478 0 10c0 5.523 4.478 10 10 10 5.523 0 10-4.477 10-10 0-5.522-4.477-10-10-10z"/>
-                      </svg>
+
+            {accounts.filter(account => account.platform === 'reddit').length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                No Reddit accounts connected. Click the button above to connect one.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {accounts
+                  .filter(account => account.platform === 'reddit')
+                  .map((account) => (
+                    <div
+                      key={account.id}
+                      className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="flex-shrink-0">
+                          <div className="w-10 h-10 bg-[#FF4500] rounded-full flex items-center justify-center">
+                            <span className="text-white font-bold">
+                              {account.accountName?.[0]?.toUpperCase() || 'R'}
+                            </span>
+                          </div>
+                        </div>
+                        <div>
+                          <div className="font-medium text-gray-900">
+                            {account.accountName}
+                            {account.isActive && (
+                              <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">
+                                Active
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            Connected {new Date(account.createdAt).toLocaleDateString()}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-3">
+                        <button
+                          onClick={() => handleSetActiveAccount(account.id)}
+                          className={`text-sm ${
+                            account.isActive
+                              ? 'text-green-600 cursor-default'
+                              : 'text-blue-600 hover:text-blue-800'
+                          }`}
+                          disabled={account.isActive}
+                        >
+                          {account.isActive ? 'Active Account' : 'Set as Active'}
+                        </button>
+                        <div className="w-px h-4 bg-gray-300"></div>
+                        <button
+                          onClick={() => handleDisconnect(account.id)}
+                          className="text-sm text-red-600 hover:text-red-800"
+                        >
+                          Disconnect
+                        </button>
+                      </div>
                     </div>
-                    <div>
-                      <p className="font-medium text-gray-900">u/{account.accountName}</p>
-                      <p className="text-sm text-gray-500">Reddit Account</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleDisconnect(account.id)}
-                    className="px-3 py-1 text-sm text-red-600 hover:text-red-800 focus:outline-none"
-                  >
-                    Disconnect
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+                  ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

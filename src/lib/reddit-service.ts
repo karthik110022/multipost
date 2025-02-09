@@ -547,7 +547,8 @@ export class RedditService {
       state: 'random_state',
       redirect_uri: `${env.NEXT_PUBLIC_APP_URL}/auth/callback/reddit`,
       duration: 'permanent',
-      scope: 'identity submit read subscribe mysubreddits flair'
+      scope: 'identity submit read subscribe mysubreddits flair',
+      prompt: 'consent'
     };
 
     // Log the redirect URI for debugging

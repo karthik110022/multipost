@@ -36,21 +36,30 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { title, content, subreddit, accountIds, flairId } = body;
 
-    if (!title || !content || !subreddit || !accountIds || !Array.isArray(accountIds) || accountIds.length === 0) {
+    if (!title || !content || !subreddit) {
       return new NextResponse(
-        JSON.stringify({ error: 'Missing required fields' }),
+        JSON.stringify({ error: 'Missing required fields: title, content, and subreddit are required' }),
         { status: 400 }
       );
     }
 
     const socialMediaService = new SocialMediaService(supabase);
-    const result = await socialMediaService.createPost(accountIds, content, title, subreddit, flairId);
+    
+    // If accountIds is provided, validate it's an array
+    if (accountIds && (!Array.isArray(accountIds) || accountIds.length === 0)) {
+      return new NextResponse(
+        JSON.stringify({ error: 'If accountIds is provided, it must be a non-empty array' }),
+        { status: 400 }
+      );
+    }
+
+    const result = await socialMediaService.createPost(accountIds || null, content, title, subreddit, flairId);
 
     return NextResponse.json(result);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating post:', error);
     return new NextResponse(
-      JSON.stringify({ error: 'Internal server error' }),
+      JSON.stringify({ error: error.message || 'Internal server error' }),
       { status: 500 }
     );
   }

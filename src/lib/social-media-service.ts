@@ -7,6 +7,8 @@ export interface SocialAccount {
   accountName: string;
   accountId: string;
   accessToken?: string;
+  isActive?: boolean;
+  createdAt: string;
 }
 
 export interface PostResult {
@@ -63,7 +65,8 @@ export class SocialMediaService {
     try {
       const { data: accounts, error } = await this.supabase
         .from('social_accounts')
-        .select('*');
+        .select('*')
+        .order('created_at', { ascending: false });
 
       if (error) {
         console.error('Error fetching accounts:', error);
@@ -74,7 +77,8 @@ export class SocialMediaService {
         return [];
       }
 
-      console.log('Raw account data:', accounts);
+      // Get the active account ID from local storage
+      const activeAccountId = localStorage.getItem('activeAccountId');
 
       const transformedAccounts = accounts.map((account: {
         id: string;
@@ -82,9 +86,19 @@ export class SocialMediaService {
         account_name: string;
         account_id: string;
         access_token?: string;
-      }) => this.transformAccount(account));
+        created_at: string;
+      }) => ({
+        ...this.transformAccount(account),
+        isActive: account.id === activeAccountId,
+        createdAt: account.created_at
+      }));
 
-      console.log('Transformed accounts:', transformedAccounts);
+      // If no active account is set and we have accounts, set the first one as active
+      if (!activeAccountId && transformedAccounts.length > 0) {
+        localStorage.setItem('activeAccountId', transformedAccounts[0].id);
+        transformedAccounts[0].isActive = true;
+      }
+
       return transformedAccounts;
     } catch (error) {
       console.error('Error fetching accounts:', error);
@@ -92,20 +106,50 @@ export class SocialMediaService {
     }
   }
 
-  private transformAccount(account: {
-    id: string;
-    platform: 'reddit';
-    account_name: string;
-    account_id: string;
-    access_token?: string;
-  }): SocialAccount {
-    return {
-      id: account.id,
-      platform: account.platform,
-      accountName: account.account_name,
-      accountId: account.account_id,
-      accessToken: account.access_token,
-    };
+  async setActiveAccount(accountId: string): Promise<void> {
+    try {
+      const { data: account, error } = await this.supabase
+        .from('social_accounts')
+        .select('*')
+        .eq('id', accountId)
+        .single();
+
+      if (error || !account) {
+        throw new Error('Account not found');
+      }
+
+      localStorage.setItem('activeAccountId', accountId);
+    } catch (error) {
+      console.error('Error setting active account:', error);
+      throw error;
+    }
+  }
+
+  async getActiveAccount(): Promise<SocialAccount | null> {
+    try {
+      const activeAccountId = localStorage.getItem('activeAccountId');
+      if (!activeAccountId) return null;
+
+      const { data: account, error } = await this.supabase
+        .from('social_accounts')
+        .select('*')
+        .eq('id', activeAccountId)
+        .single();
+
+      if (error || !account) {
+        localStorage.removeItem('activeAccountId');
+        return null;
+      }
+
+      return {
+        ...this.transformAccount(account),
+        isActive: true,
+        createdAt: account.created_at
+      };
+    } catch (error) {
+      console.error('Error getting active account:', error);
+      return null;
+    }
   }
 
   async disconnectAccount(accountId: string): Promise<void> {
@@ -176,7 +220,7 @@ export class SocialMediaService {
   }
 
   async createPost(
-    accountIds: string[],
+    accountIds: string[] | null,
     content: string,
     title?: string,
     subreddit?: string,
@@ -184,6 +228,15 @@ export class SocialMediaService {
     imageUrl?: string
   ): Promise<PostResult[]> {
     try {
+      // If no account IDs provided, use the active account
+      if (!accountIds || accountIds.length === 0) {
+        const activeAccount = await this.getActiveAccount();
+        if (!activeAccount) {
+          throw new Error('No active account found. Please connect and select an account first.');
+        }
+        accountIds = [activeAccount.id];
+      }
+      
       console.log('Creating post for accounts:', accountIds);
       
       const results: PostResult[] = [];
@@ -262,6 +315,28 @@ export class SocialMediaService {
               continue;
             }
 
+            // Check if token needs refresh
+            try {
+              const isValid = await this.redditService.validateAccessToken(account.access_token!);
+              if (!isValid && account.refresh_token) {
+                const newToken = await this.redditService.refreshToken(account.refresh_token);
+                account.access_token = newToken;
+                
+                // Update token in database
+                await this.supabase
+                  .from('social_accounts')
+                  .update({ access_token: newToken })
+                  .eq('id', accountId);
+              }
+            } catch (error) {
+              console.error('Error validating/refreshing token:', error);
+              results.push({
+                success: false,
+                error: 'Authentication error. Please reconnect your account.'
+              });
+              continue;
+            }
+
             console.log(`Posting to Reddit - Subreddit: ${subreddit}`);
             const result = await this.redditService.submitPost(
               account.access_token!,
@@ -314,10 +389,14 @@ export class SocialMediaService {
           });
         }
       }
+
       return results;
     } catch (error: any) {
-      console.error('Failed to create post:', error);
-      return [{ success: false, error: error.message || 'Failed to create post' }];
+      console.error('Error in createPost:', error);
+      return [{
+        success: false,
+        error: error.message
+      }];
     }
   }
 
@@ -358,6 +437,7 @@ export class SocialMediaService {
           access_token: tokens.access_token,
           refresh_token: tokens.refresh_token,
           token_expires: new Date(tokens.expires_at).toISOString(),
+          created_at: new Date().toISOString()
         });
 
       if (insertError) throw insertError;
@@ -450,6 +530,24 @@ export class SocialMediaService {
       console.error('Error deleting post history:', error);
       throw new Error('Failed to delete post history');
     }
+  }
+
+  private transformAccount(account: {
+    id: string;
+    platform: 'reddit';
+    account_name: string;
+    account_id: string;
+    access_token?: string;
+    created_at: string;
+  }): SocialAccount {
+    return {
+      id: account.id,
+      platform: account.platform,
+      accountName: account.account_name,
+      accountId: account.account_id,
+      accessToken: account.access_token,
+      createdAt: account.created_at
+    };
   }
 }
 

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, parseISO } from 'date-fns';
 import { toast } from 'react-hot-toast';
 import { createBrowserClient } from '@supabase/ssr';
 import { SocialMediaService } from '@/lib/social-media-service';
@@ -19,14 +19,7 @@ export function PostHistory() {
   const [posts, setPosts] = useState<PostHistoryType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [selectedSubreddit, setSelectedSubreddit] = useState('');
-  const [selectedFlair, setSelectedFlair] = useState<{ id: string; text: string } | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string>('');
-  const [isDragging, setIsDragging] = useState(false);
+  const [filter, setFilter] = useState<string>('all');
 
   const socialMediaService = new SocialMediaService();
 
@@ -35,52 +28,6 @@ export function PostHistory() {
       loadPosts();
     }
   }, [user]);
-
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-
-    const files = Array.from(e.dataTransfer.files);
-    const imageFile = files.find(file => file.type.startsWith('image/'));
-    
-    if (imageFile) {
-      setSelectedImage(imageFile);
-      const previewUrl = URL.createObjectURL(imageFile);
-      setImagePreview(previewUrl);
-    }
-  }, []);
-
-  const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setSelectedImage(file);
-      const previewUrl = URL.createObjectURL(file);
-      setImagePreview(previewUrl);
-    }
-  };
-
-  const handleRemoveImage = () => {
-    setSelectedImage(null);
-    setImagePreview('');
-  };
 
   const loadPosts = async () => {
     try {
@@ -91,66 +38,6 @@ export function PostHistory() {
       setError('Failed to load posts');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!title || !content || !selectedSubreddit) {
-      toast.error('Please fill in all required fields');
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      let imageUrl;
-      if (selectedImage) {
-        // Upload to Supabase Storage
-        const fileExt = selectedImage.name.split('.').pop();
-        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('media')
-          .upload(fileName, selectedImage);
-
-        if (uploadError) throw uploadError;
-
-        // Get the public URL
-        const { data: { publicUrl } } = supabase.storage
-          .from('media')
-          .getPublicUrl(fileName);
-
-        imageUrl = publicUrl;
-      }
-
-      const result = await socialMediaService.createPost(
-        [user!.id],
-        content,
-        title,
-        selectedSubreddit,
-        selectedFlair?.id,
-        imageUrl
-      );
-
-      if (result[0].success) {
-        toast.success('Post created successfully!');
-        setContent('');
-        setTitle('');
-        setSelectedSubreddit('');
-        setSelectedFlair(null);
-        setSelectedImage(null);
-        setImagePreview('');
-        loadPosts();
-      } else if (result[0].requiresFlair) {
-        setSelectedFlair(null);
-        toast.error(result[0].error || 'A flair is required for this subreddit');
-      } else {
-        toast.error(result[0].error || 'Failed to create post');
-      }
-    } catch (error) {
-      console.error('Error creating post:', error);
-      toast.error('Failed to create post');
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -198,154 +85,37 @@ export function PostHistory() {
     return (
       <div className="text-center py-12">
         <h3 className="text-lg font-medium text-gray-900">No posts yet</h3>
-        <p className="mt-1 text-sm text-gray-500">Get started by creating your first post!</p>
+        <p className="mt-1 text-sm text-gray-500">Your post history will appear here once you create posts.</p>
       </div>
     );
   }
 
+  const filteredPosts = posts.filter(post =>
+    filter === 'all' ? true : post.account?.platform === filter.toLowerCase()
+  );
+
   return (
     <div className="p-4">
-      <form onSubmit={handleSubmit} className="mb-8 space-y-4">
-        <div>
-          <label htmlFor="title" className="block text-sm font-medium text-gray-700">
-            Title
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-4">Post History</h1>
+        <div className="flex items-center space-x-4">
+          <label htmlFor="platform-filter" className="text-sm font-medium text-gray-700">
+            Filter by Platform:
           </label>
-          <input
-            type="text"
-            id="title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-            required
-          />
-        </div>
-
-        <div>
-          <label htmlFor="content" className="block text-sm font-medium text-gray-700">
-            Content
-          </label>
-          <textarea
-            id="content"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={4}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-            required
-          />
-        </div>
-
-        <div>
-          <label htmlFor="subreddit" className="block text-sm font-medium text-gray-700">
-            Subreddit
-          </label>
-          <input
-            type="text"
-            id="subreddit"
-            value={selectedSubreddit}
-            onChange={(e) => setSelectedSubreddit(e.target.value)}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-            required
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Image (optional)
-          </label>
-          <div
-            className={`mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-dashed rounded-md ${
-              isDragging
-                ? 'border-indigo-500 bg-indigo-50'
-                : 'border-gray-300 hover:border-indigo-500'
-            }`}
-            onDragEnter={handleDragEnter}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
+          <select
+            id="platform-filter"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
           >
-            <div className="space-y-1 text-center">
-              {!imagePreview ? (
-                <>
-                  <svg
-                    className="mx-auto h-12 w-12 text-gray-400"
-                    stroke="currentColor"
-                    fill="none"
-                    viewBox="0 0 48 48"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  <div className="flex text-sm text-gray-600">
-                    <label
-                      htmlFor="image-upload"
-                      className="relative cursor-pointer rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500"
-                    >
-                      <span>Upload a file</span>
-                      <input
-                        id="image-upload"
-                        name="image-upload"
-                        type="file"
-                        className="sr-only"
-                        accept="image/*"
-                        onChange={handleImageChange}
-                      />
-                    </label>
-                    <p className="pl-1">or drag and drop</p>
-                  </div>
-                  <p className="text-xs text-gray-500">PNG, JPG, GIF up to 10MB</p>
-                </>
-              ) : (
-                <div className="relative">
-                  <img
-                    src={imagePreview}
-                    alt="Preview"
-                    className="max-h-48 rounded-lg"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleRemoveImage}
-                    className="absolute -top-2 -right-2 rounded-full bg-red-500 text-white p-1 hover:bg-red-600"
-                  >
-                    <svg
-                      className="h-4 w-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="2"
-                        d="M6 18L18 6M6 6l12 12"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
+            <option value="all">All Platforms</option>
+            <option value="reddit">Reddit</option>
+          </select>
         </div>
-
-        <div>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className={`inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
-              isSubmitting ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-          >
-            {isSubmitting ? 'Creating Post...' : 'Create Post'}
-          </button>
-        </div>
-      </form>
+      </div>
 
       <div className="space-y-6">
-        {posts.map((post) => (
+        {filteredPosts.map((post) => (
           <div key={post.id} className="bg-white shadow rounded-lg p-6 space-y-4">
             <div className="flex justify-between items-start">
               <div>
@@ -369,6 +139,11 @@ export function PostHistory() {
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(post.status)}`}>
                   {post.status}
                 </span>
+                {post.account?.platform && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                    {post.account.platform}
+                  </span>
+                )}
                 {post.errorMessage && (
                   <span className="text-xs text-red-600">{post.errorMessage}</span>
                 )}
@@ -376,25 +151,35 @@ export function PostHistory() {
             </div>
             <div className="mt-4 flex justify-between items-center text-sm text-gray-500">
               <div>
-                Posted {formatDistanceToNow(new Date(post.createdAt))} ago
+                {(() => {
+                  if (!post.createdAt) return 'Date not available';
+                  try {
+                    return `Posted ${formatDistanceToNow(parseISO(post.createdAt))} ago`;
+                  } catch (error) {
+                    console.error('Error formatting date:', error);
+                    return 'Invalid date';
+                  }
+                })()}
               </div>
-              {post.postUrl && (
-                <a
-                  href={post.postUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-indigo-600 hover:text-indigo-900"
+              <div className="flex items-center space-x-4">
+                {post.postUrl && (
+                  <a
+                    href={post.postUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-600 hover:text-indigo-900"
+                  >
+                    View on Reddit
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleDelete(post.id)}
+                  className="text-red-600 hover:text-red-900"
                 >
-                  View on Reddit
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={() => handleDelete(post.id)}
-                className="text-red-600 hover:text-red-900"
-              >
-                Delete
-              </button>
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
         ))}

@@ -10,11 +10,23 @@ interface PostFormData {
   content: string;
   title: string;
   selectedAccounts: string[];
-  subreddit: string;
+  subreddits: Array<{
+    accountId: string;
+    subreddit: string;
+    flairId?: string;
+  }>;
 }
 
 interface Props {
   user: User | null;
+}
+
+interface PostResult {
+  success: boolean;
+  platformPostId?: string;
+  error?: string;
+  accountId?: string;
+  subreddit?: string;
 }
 
 export default function PostForm({ user }: Props) {
@@ -25,63 +37,169 @@ export default function PostForm({ user }: Props) {
     content: '',
     title: '',
     selectedAccounts: [],
-    subreddit: ''
+    subreddits: []
   });
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
-  const [subreddits, setSubreddits] = useState<Array<{ name: string; displayName: string }>>([]);
-  const [loadingSubreddits, setLoadingSubreddits] = useState(false);
-  const [flairs, setFlairs] = useState<Array<{ id: string; text: string }>>([]);
-  const [selectedFlair, setSelectedFlair] = useState<string>('');
+  const [subredditsByAccount, setSubredditsByAccount] = useState<Record<string, Array<{ name: string; displayName: string }>>>({});
+  const [flairsBySubreddit, setFlairsBySubreddit] = useState<Record<string, Array<{ id: string; text: string }>>>({});
+  const [loadingSubreddits, setLoadingSubreddits] = useState<Record<string, boolean>>({});
+  const [loadingFlairs, setLoadingFlairs] = useState<Record<string, boolean>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [loadingFlairs, setLoadingFlairs] = useState(false);
+  const [postResults, setPostResults] = useState<PostResult[]>([]);
+  const [showResults, setShowResults] = useState(false);
 
   useEffect(() => {
     loadAccounts();
   }, []);
 
   useEffect(() => {
-    const redditAccount = accounts.find(
-      account => account.platform === 'reddit' && formData.selectedAccounts.includes(account.id)
-    );
-
-    if (redditAccount) {
-      loadSubreddits(redditAccount.id);
-    }
-  }, [formData.selectedAccounts, accounts]);
-
-  useEffect(() => {
-    const loadFlairs = async () => {
-      if (!formData.subreddit || !formData.selectedAccounts.some(id => 
-        accounts.find(acc => acc.id === id && acc.platform === 'reddit')
-      )) {
-        setFlairs([]);
-        return;
-      }
-
-      setLoadingFlairs(true);
+    const loadSubredditsForAccount = async (accountId: string) => {
+      setLoadingSubreddits(prev => ({ ...prev, [accountId]: true }));
       try {
-        const redditAccount = accounts.find(a => a.platform === 'reddit' && formData.selectedAccounts.includes(a.id));
-        if (!redditAccount) return;
-
-        const flairOptions = await socialMediaService.getSubredditFlairs(
-          redditAccount.id,
-          formData.subreddit
-        );
-        setFlairs(flairOptions);
-        
-        // Auto-select first flair if only one option
-        if (flairOptions.length === 1) {
-          setSelectedFlair(flairOptions[0].id);
-        }
+        const fetchedSubreddits = await socialMediaService.getSubreddits(accountId);
+        setSubredditsByAccount(prev => ({
+          ...prev,
+          [accountId]: fetchedSubreddits
+        }));
       } catch (error) {
-        console.error('Error loading flairs:', error);
+        console.error('Error loading subreddits:', error);
+        setError('Failed to load subreddits');
       } finally {
-        setLoadingFlairs(false);
+        setLoadingSubreddits(prev => ({ ...prev, [accountId]: false }));
       }
     };
 
-    loadFlairs();
-  }, [formData.subreddit, accounts, formData.selectedAccounts]);
+    // Load subreddits for each selected Reddit account
+    formData.selectedAccounts.forEach(accountId => {
+      const account = accounts.find(acc => acc.id === accountId);
+      if (account?.platform === 'reddit') {
+        loadSubredditsForAccount(accountId);
+      }
+    });
+
+    // Remove subreddit selections for unselected accounts
+    setFormData(prev => ({
+      ...prev,
+      subreddits: prev.subreddits.filter(sub => 
+        formData.selectedAccounts.includes(sub.accountId)
+      )
+    }));
+  }, [formData.selectedAccounts, accounts]);
+
+  const loadFlairsForSubreddit = async (accountId: string, subreddit: string) => {
+    setLoadingFlairs(prev => ({ ...prev, [`${accountId}-${subreddit}`]: true }));
+    try {
+      const redditAccount = accounts.find(a => a.id === accountId && a.platform === 'reddit');
+      if (!redditAccount) return;
+
+      const flairOptions = await socialMediaService.getSubredditFlairs(
+        accountId,
+        subreddit
+      );
+      setFlairsBySubreddit(prev => ({
+        ...prev,
+        [`${accountId}-${subreddit}`]: flairOptions
+      }));
+    } catch (error) {
+      console.error('Error loading flairs:', error);
+    } finally {
+      setLoadingFlairs(prev => ({ ...prev, [`${accountId}-${subreddit}`]: false }));
+    }
+  };
+
+  const handleSubredditChange = (accountId: string, subreddit: string) => {
+    setFormData(prev => {
+      const existingIndex = prev.subreddits.findIndex(s => s.accountId === accountId);
+      const newSubreddits = [...prev.subreddits];
+      
+      if (existingIndex >= 0) {
+        newSubreddits[existingIndex] = { accountId, subreddit };
+      } else {
+        newSubreddits.push({ accountId, subreddit });
+      }
+
+      return {
+        ...prev,
+        subreddits: newSubreddits
+      };
+    });
+
+    // Load flairs for the selected subreddit
+    loadFlairsForSubreddit(accountId, subreddit);
+  };
+
+  const handleFlairChange = (accountId: string, flairId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      subreddits: prev.subreddits.map(sub =>
+        sub.accountId === accountId
+          ? { ...sub, flairId }
+          : sub
+      )
+    }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setError('');
+    setShowResults(false);
+    setPostResults([]);
+
+    try {
+      const response = await fetch('/api/social/create-post', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: formData.content,
+          title: formData.title,
+          posts: formData.subreddits.map(sub => ({
+            accountId: sub.accountId,
+            subreddit: sub.subreddit,
+            flairId: sub.flairId
+          }))
+        }),
+      });
+
+      const results = await response.json();
+
+      if (!response.ok) {
+        throw new Error(results.error || 'Failed to create posts');
+      }
+
+      // Map results to include account and subreddit info
+      const enhancedResults = results.map((result: PostResult, index: number) => ({
+        ...result,
+        accountId: formData.subreddits[index].accountId,
+        subreddit: formData.subreddits[index].subreddit
+      }));
+
+      setPostResults(enhancedResults);
+      setShowResults(true);
+
+      // Only reset form if all posts were successful
+      if (enhancedResults.every((r: PostResult) => r.success)) {
+        setFormData({
+          content: '',
+          title: '',
+          selectedAccounts: [],
+          subreddits: []
+        });
+        toast.success('All posts created successfully!');
+      } else {
+        // If some posts failed, show a warning
+        toast.error('Some posts failed. Check the results below.');
+      }
+    } catch (error: any) {
+      console.error('Error creating posts:', error);
+      setError(error.message || 'Failed to create posts');
+      toast.error(error.message || 'Failed to create posts');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const loadAccounts = async () => {
     try {
@@ -91,62 +209,6 @@ export default function PostForm({ user }: Props) {
     } catch (error) {
       console.error('Error loading accounts:', error);
       toast.error('Failed to load connected accounts');
-    }
-  };
-
-  const loadSubreddits = async (accountId: string) => {
-    setLoadingSubreddits(true);
-    try {
-      const fetchedSubreddits = await socialMediaService.getSubreddits(accountId);
-      setSubreddits(fetchedSubreddits);
-    } catch (error) {
-      console.error('Error loading subreddits:', error);
-      setError('Failed to load subreddits');
-    } finally {
-      setLoadingSubreddits(false);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    setError('');
-
-    try {
-      const response = await fetch('/api/social/create-post', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          accountIds: formData.selectedAccounts,
-          content: formData.content,
-          title: formData.title,
-          subreddit: formData.subreddit,
-          flairId: selectedFlair || undefined
-        }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to create post');
-      }
-
-      // Reset form
-      setFormData({
-        content: '',
-        title: '',
-        subreddit: '',
-        selectedAccounts: []
-      });
-      setSelectedFlair('');
-      toast.success('Post created successfully!');
-    } catch (error: any) {
-      console.error('Error creating post:', error);
-      setError(error.message || 'Failed to create post');
-      toast.error(error.message || 'Failed to create post');
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -195,58 +257,66 @@ export default function PostForm({ user }: Props) {
             />
           </div>
 
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Subreddit
-            </label>
-            <select
-              value={formData.subreddit}
-              onChange={e => setFormData(prev => ({ ...prev, subreddit: e.target.value }))}
-              className="w-full p-2 border rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600"
-              required
-            >
-              <option value="">Select a subreddit</option>
-              {loadingSubreddits ? (
-                <option value="" disabled>Loading subreddits...</option>
-              ) : (
-                subreddits.map(subreddit => (
-                  <option key={subreddit.name} value={subreddit.name}>
-                    {subreddit.displayName || subreddit.name}
-                  </option>
-                ))
-              )}
-            </select>
-            {loadingSubreddits && (
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Loading your subreddits...</p>
-            )}
-            {!loadingSubreddits && subreddits.length === 0 && (
-              <p className="mt-1 text-sm text-red-500 dark:text-red-400">
-                No subreddits found. Please make sure you're subscribed to some subreddits.
-              </p>
-            )}
-          </div>
+          {formData.selectedAccounts.map(accountId => {
+            const account = accounts.find(acc => acc.id === accountId);
+            if (account?.platform !== 'reddit') return null;
 
-          {formData.subreddit && flairs.length > 0 && (
-            <div>
-              <label htmlFor="flair" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Post Flair <span className="text-red-500">*</span>
-              </label>
-              <select
-                id="flair"
-                value={selectedFlair}
-                onChange={(e) => setSelectedFlair(e.target.value)}
-                required
-                className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-              >
-                <option value="">Select a flair</option>
-                {flairs.map((flair) => (
-                  <option key={flair.id} value={flair.id}>
-                    {flair.text}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+            const subreddits = subredditsByAccount[accountId] || [];
+            const selectedSubreddit = formData.subreddits.find(s => s.accountId === accountId);
+
+            return (
+              <div key={accountId} className="mb-6 p-4 border rounded">
+                <h3 className="font-medium mb-3">{account.accountName}</h3>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Subreddit
+                  </label>
+                  <select
+                    value={selectedSubreddit?.subreddit || ''}
+                    onChange={e => handleSubredditChange(accountId, e.target.value)}
+                    className="w-full p-2 border rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600"
+                    required
+                  >
+                    <option value="">Select a subreddit</option>
+                    {loadingSubreddits[accountId] ? (
+                      <option value="" disabled>Loading subreddits...</option>
+                    ) : (
+                      subreddits.map(subreddit => (
+                        <option key={subreddit.name} value={subreddit.name}>
+                          {subreddit.displayName || subreddit.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                {selectedSubreddit?.subreddit && (
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Post Flair
+                    </label>
+                    <select
+                      value={selectedSubreddit.flairId || ''}
+                      onChange={e => handleFlairChange(accountId, e.target.value)}
+                      className="w-full p-2 border rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600"
+                    >
+                      <option value="">No flair</option>
+                      {loadingFlairs[`${accountId}-${selectedSubreddit.subreddit}`] ? (
+                        <option value="" disabled>Loading flairs...</option>
+                      ) : (
+                        (flairsBySubreddit[`${accountId}-${selectedSubreddit.subreddit}`] || []).map(flair => (
+                          <option key={flair.id} value={flair.id}>
+                            {flair.text}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -263,15 +333,45 @@ export default function PostForm({ user }: Props) {
         </>
       )}
 
-      {error && (
-        <div className="text-red-500 dark:text-red-400 mb-4">
-          {error}
+      {showResults && postResults.length > 0 && (
+        <div className="mt-6 space-y-4">
+          <h3 className="text-lg font-medium">Post Results:</h3>
+          <div className="divide-y divide-gray-200 dark:divide-gray-700">
+            {postResults.map((result, index) => {
+              const account = accounts.find(acc => acc.id === result.accountId);
+              return (
+                <div key={index} className="py-4">
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-2 h-2 rounded-full ${result.success ? 'bg-green-500' : 'bg-red-500'}`} />
+                    <span className="font-medium">
+                      {account?.accountName} ({account?.platform})
+                    </span>
+                    <span className="text-gray-500">→</span>
+                    <span className="text-gray-700 dark:text-gray-300">
+                      r/{result.subreddit}
+                    </span>
+                  </div>
+                  {result.success ? (
+                    <p className="mt-1 text-sm text-green-600 dark:text-green-400">
+                      Post created successfully
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+                      {result.error === 'INSUFFICIENT_KARMA' 
+                        ? `Not enough karma to post in r/${result.subreddit}`
+                        : result.error || 'Failed to create post'}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {success && (
-        <div className="text-green-500 dark:text-green-400 mb-4">
-          Post created successfully!
+      {error && (
+        <div className="text-red-500 dark:text-red-400 mb-4">
+          {error}
         </div>
       )}
 
@@ -284,7 +384,7 @@ export default function PostForm({ user }: Props) {
             : 'bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700'
         } text-white`}
       >
-        {isSubmitting ? 'Creating Post...' : 'Create Post'}
+        {isSubmitting ? 'Creating Posts...' : 'Create Posts'}
       </button>
     </form>
   );

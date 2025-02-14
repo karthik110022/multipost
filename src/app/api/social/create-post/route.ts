@@ -34,26 +34,27 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { title, content, subreddit, accountIds, flairId } = body;
+    const { title, content, posts } = body;
 
-    if (!title || !content || !subreddit) {
+    if (!title || !content || !posts || !Array.isArray(posts) || posts.length === 0) {
       return new NextResponse(
-        JSON.stringify({ error: 'Missing required fields: title, content, and subreddit are required' }),
+        JSON.stringify({ error: 'Missing required fields: title, content, and at least one post configuration are required' }),
         { status: 400 }
       );
+    }
+
+    // Validate each post configuration
+    for (const post of posts) {
+      if (!post.accountId || !post.subreddit) {
+        return new NextResponse(
+          JSON.stringify({ error: 'Each post configuration must include accountId and subreddit' }),
+          { status: 400 }
+        );
+      }
     }
 
     const socialMediaService = new SocialMediaService(supabase);
-    
-    // If accountIds is provided, validate it's an array
-    if (accountIds && (!Array.isArray(accountIds) || accountIds.length === 0)) {
-      return new NextResponse(
-        JSON.stringify({ error: 'If accountIds is provided, it must be a non-empty array' }),
-        { status: 400 }
-      );
-    }
-
-    const result = await socialMediaService.createPost(accountIds || null, content, title, subreddit, flairId);
+    const result = await socialMediaService.createPost(content, title, posts);
 
     return NextResponse.json(result);
   } catch (error: any) {

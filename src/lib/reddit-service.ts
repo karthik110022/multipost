@@ -183,14 +183,20 @@ interface RedditFlair {
 }
 
 interface RedditApiResponse {
-  json: {
-    errors: string[][];
+  json?: {
     data?: {
-      name?: string;
-      id?: string;
       url?: string;
+      name?: string;
     };
+    errors?: [string, string][];
   };
+  jquery?: Array<[number, number, string, Array<any>]>;
+  success?: boolean;
+}
+
+interface RedditError {
+  reason?: string;
+  message?: string;
 }
 
 export class RedditService {
@@ -237,100 +243,97 @@ export class RedditService {
     }
   }
 
-  private async handleApiError(error: unknown, context: string): Promise<never> {
-    if (error && typeof error === 'object' && 'response' in error) {
-      const axiosError = error as AxiosError;
+  private handleApiError(error: any): never {
+    console.error('Reddit API Error:', error?.response?.data || error);
+    
+    // Handle specific Reddit API errors
+    if (error?.response?.data) {
+      const redditError = error.response.data;
+      
+      // Check for karma-related errors
+      if (redditError.reason === 'LOW_KARMA' || 
+          (redditError.message && redditError.message.toLowerCase().includes('karma'))) {
+        throw new Error('INSUFFICIENT_KARMA');
+      }
+      
+      // Check for rate limiting
+      if (redditError.reason === 'RATELIMIT' || 
+          redditError.message && redditError.message.toLowerCase().includes('rate limit')) {
+        throw new Error('RATE_LIMITED');
+      }
 
-      if (axiosError.response?.status === 429) {
-        const retryAfter = parseInt(axiosError.response.headers['retry-after'] || '60', 10);
-        throw new Error(`Rate limit exceeded. Try again in ${retryAfter} seconds`);
-      } else if (axiosError.response?.status === 403) {
-        throw new Error('Forbidden: Check subreddit access and account age requirements');
-      } else if (axiosError.response?.status === 401) {
-        throw new Error('Authentication failed. Please reconnect your Reddit account');
+      // Check for invalid subreddit
+      if (redditError.reason === 'SUBREDDIT_NOTALLOWED' || 
+          redditError.reason === 'SUBREDDIT_NOEXIST') {
+        throw new Error('INVALID_SUBREDDIT');
+      }
+
+      // If we have a specific error message from Reddit, use it
+      if (redditError.message) {
+        throw new Error(redditError.message);
       }
     }
-    console.error(`Error in ${context}:`, error);
-    throw new Error(`Failed to ${context}`);
+
+    // Generic error fallback
+    throw new Error('Failed to make Reddit API request');
   }
 
   private async makeApiRequest<T>(
     endpoint: string,
     options: {
-      method?: string;
-      data?: any;
-      params?: any;
-      headers?: any;
+      method: string;
+      headers?: Record<string, string>;
+      body?: string;
       accessToken?: string;
-    } = {}
+    }
   ): Promise<T> {
-    const {
-      method = 'GET',
-      data,
-      params,
-      headers = {},
-      accessToken
-    } = options;
+    const url = endpoint.startsWith('http') ? endpoint : `https://oauth.reddit.com${endpoint}`;
+    console.log('🌐 Making API request to:', endpoint);
+    console.log('Method:', options.method);
 
-    const baseHeaders: Record<string, string> = {
+    const headers: Record<string, string> = {
+      ...options.headers,
       'Content-Type': 'application/x-www-form-urlencoded',
-      ...headers
     };
 
-    if (accessToken) {
-      baseHeaders['Authorization'] = `Bearer ${accessToken}`;
+    // Add authorization header if access token is provided
+    if (options.accessToken) {
+      headers['Authorization'] = `Bearer ${options.accessToken}`;
     }
 
+    console.log('Headers:', headers);
+    console.log('Body:', options.body);
+
     try {
-      console.log(`🌐 Making API request to: ${endpoint}`);
-      console.log('Method:', method);
-      console.log('Headers:', JSON.stringify(baseHeaders, null, 2));
-      if (data) {
-        console.log('Data:', JSON.stringify(data, null, 2));
-      }
-      
-      const response = await axios({
-        method,
-        url: endpoint.startsWith('http') ? endpoint : `https://oauth.reddit.com${endpoint}`,
-        data,
-        params,
-        headers: baseHeaders,
-        transformRequest: [(data) => {
-          if (!data) return data;
-          return Object.entries(data)
-            .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
-            .join('&');
-        }]
+      const response = await fetch(url, {
+        method: options.method,
+        headers,
+        body: options.body
       });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API request failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+        });
+        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      }
 
       console.log('✅ API request successful');
-      return response.data;
-    } catch (error: any) {
-      console.error('❌ API request failed:', {
-        error: error.message,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data
-      });
-
-      // Check if it's a network error
-      if (error.message === 'Network Error') {
-        throw new Error('Unable to connect to Reddit. Please check your internet connection and Reddit access token.');
-      }
-
-      // Check if it's an authentication error
-      if (error.response?.status === 401) {
-        throw new Error('Reddit authentication failed. Please reconnect your Reddit account.');
-      }
-
-      return this.handleApiError(error, `API request to ${endpoint} failed`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('❌ API request error:', error);
+      throw error;
     }
   }
 
   async validateAccessToken(accessToken: string): Promise<boolean> {
     try {
       console.log('Validating Reddit access token...');
-      await this.makeApiRequest('/api/v1/me', { accessToken });
+      await this.makeApiRequest('/api/v1/me', { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } });
       console.log('✅ Access token is valid');
       return true;
     } catch (error) {
@@ -349,19 +352,15 @@ export class RedditService {
 
       const response = await this.makeApiRequest<RedditTokenResponse>('https://www.reddit.com/api/v1/access_token', {
         method: 'POST',
-        data: {
-          grant_type: 'authorization_code',
-          code,
-          redirect_uri: this.redirectUri
-        },
         headers: {
           'Authorization': `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`
-        }
+        },
+        body: `grant_type=authorization_code&code=${code}&redirect_uri=${this.redirectUri}`
       });
 
       return response.access_token;
     } catch (error) {
-      return this.handleApiError(error, 'get access token');
+      return this.handleApiError(error);
     }
   }
 
@@ -370,39 +369,44 @@ export class RedditService {
       this.validateCredentials();
       const response = await this.makeApiRequest<RedditTokenResponse>('https://www.reddit.com/api/v1/access_token', {
         method: 'POST',
-        data: {
-          grant_type: 'refresh_token',
-          refresh_token: refreshToken
-        },
         headers: {
           'Authorization': `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`
-        }
+        },
+        body: `grant_type=refresh_token&refresh_token=${refreshToken}`
       });
 
       return response.access_token;
     } catch (error) {
-      return this.handleApiError(error, 'refresh token');
+      return this.handleApiError(error);
     }
   }
 
   async getFlairOptions(accessToken: string, subreddit: string): Promise<Array<{ id: string; text: string }>> {
     try {
-      const response = await axios.get<RedditFlair[]>(
-        `https://oauth.reddit.com/r/${subreddit}/api/link_flair_v2`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const response = await fetch(`https://oauth.reddit.com/r/${subreddit}/api/link_flair_v2`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
 
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error fetching flair options:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+        });
+        throw new Error(`Failed to fetch flair options: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
       // If the response is empty array or has error, it means no flairs are required
-      if (!response.data || !Array.isArray(response.data) || response.data.length === 0) {
+      if (!data || !Array.isArray(data) || data.length === 0) {
         return [];
       }
 
-      return response.data.map((flair: RedditFlair) => ({
+      return data.map((flair: RedditFlair) => ({
         id: flair.id,
         text: flair.text,
       }));
@@ -421,57 +425,74 @@ export class RedditService {
     subreddit: string,
     title: string,
     content: string,
-    flairId?: string,
-    imageUrl?: string
+    flairId: string
   ): Promise<string> {
-    console.log('Starting post submission...', {
-      subreddit,
-      hasFlairId: !!flairId,
-      hasImageUrl: !!imageUrl
-    });
-
+    console.log('Starting post submission...', { subreddit, hasFlairId: !!flairId });
+    
     try {
+      // Remove any 'r/' prefix if present and convert to lowercase
+      const cleanSubreddit = subreddit.replace(/^r\//, '').toLowerCase();
+      
+      console.log('Submitting post to Reddit API...');
       const formData = new URLSearchParams();
-      formData.append('sr', subreddit);
-      formData.append('title', title);
+      formData.append('api_type', 'json');
+      formData.append('sr', cleanSubreddit);
       formData.append('kind', 'self');
+      formData.append('title', title);
       formData.append('text', content);
       
       if (flairId) {
         formData.append('flair_id', flairId);
       }
 
-      console.log('Submitting post to Reddit API...');
-      const response = await this.makeApiRequest<RedditSubmitResponse>('/api/v1/submit', {
+      // Log the form data for debugging
+      console.log('Form data:', Object.fromEntries(formData));
+
+      const response = await this.makeApiRequest<RedditApiResponse>('/api/submit', {
         method: 'POST',
-        data: formData,
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        accessToken,
+        body: formData.toString(),
+        accessToken // Pass the access token here
       });
 
-      console.log('Post submission response:', response);
+      // Log the full response for debugging
+      console.log('Reddit API Response:', JSON.stringify(response, null, 2));
 
-      if (response.json.errors && response.json.errors.length > 0) {
-        const errorMessage = response.json.errors[0][1] || 'Unknown error occurred';
-        console.error('Reddit submission failed:', errorMessage);
-        throw new Error(`Reddit submission failed: ${errorMessage}`);
+      // Check for jQuery-style error responses
+      if (response.jquery) {
+        for (const entry of response.jquery) {
+          if (Array.isArray(entry) && entry.length >= 4 && Array.isArray(entry[3]) && entry[3].length > 0) {
+            const text = entry[3][0];
+            if (typeof text === 'string' && text.length > 0) {
+              if (text.includes("community name isn't recognizable")) {
+                throw new Error(`Subreddit '${subreddit}' not found or isn't accessible. Make sure it exists and you have permission to post.`);
+              }
+              if (text.toLowerCase().includes('karma')) {
+                throw new Error('Not enough karma to post in this subreddit');
+              }
+              if (text.toLowerCase().includes('rate')) {
+                throw new Error('Rate limited by Reddit. Please wait before posting again');
+              }
+              throw new Error(text);
+            }
+          }
+        }
       }
 
-      if (!response.json.data?.url) {
-        console.error('No URL in response:', response);
-        throw new Error('Failed to get post URL from Reddit response');
+      // Check for API errors in the standard format
+      if (response?.json?.errors && response.json.errors.length > 0) {
+        const [errorCode, errorMessage] = response.json.errors[0];
+        throw new Error(errorMessage || errorCode);
       }
 
-      console.log('Post submitted successfully:', response.json.data.url);
-      return response.json.data.url;
+      // Check for successful post ID
+      const postId = response?.json?.data?.name || response?.json?.data?.url;
+      if (!postId) {
+        throw new Error('Failed to get post ID from Reddit response');
+      }
+
+      return postId;
     } catch (error: any) {
-      if (axios.isAxiosError(error)) {
-        console.error('Error in submitPost:', error.response?.data || error.message);
-      } else {
-        console.error('Error in submitPost:', error);
-      }
+      console.error('Error in submitPost:', error);
       throw error;
     }
   }
@@ -481,15 +502,10 @@ export class RedditService {
       this.validateCredentials();
       await this.makeApiRequest('https://www.reddit.com/api/v1/revoke_token', {
         method: 'POST',
-        data: {
-          token
-        },
-        headers: {
-          'Authorization': `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`
-        }
+        body: `token=${token}`
       });
     } catch (error) {
-      return this.handleApiError(error, 'revoke token');
+      return this.handleApiError(error);
     }
   }
 
@@ -502,39 +518,40 @@ export class RedditService {
 
     try {
       console.log('Making token request to Reddit...');
-      const response = await axios.post<RedditTokenResponse>(
-        'https://www.reddit.com/api/v1/access_token',
-        params,
-        {
-          auth: {
-            username: this.clientId,
-            password: this.clientSecret,
-          },
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        }
-      );
+      const response = await fetch('https://www.reddit.com/api/v1/access_token', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: params.toString()
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error exchanging code:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+        });
+        throw new Error(`Failed to exchange code: ${response.status} ${response.statusText}`);
+      }
 
       console.log('Token response received:', { 
         status: response.status,
-        hasAccessToken: !!response.data.access_token,
-        hasRefreshToken: !!response.data.refresh_token,
-        expiresIn: response.data.expires_in
+        hasAccessToken: !!response.headers.get('access_token'),
+        hasRefreshToken: !!response.headers.get('refresh_token'),
+        expiresIn: response.headers.get('expires_in')
       });
 
-      const { access_token, refresh_token, expires_in } = response.data;
+      const { access_token, refresh_token, expires_in } = await response.json();
       return {
         access_token,
         refresh_token: refresh_token || '',
         expires_at: Date.now() + expires_in * 1000,
       };
     } catch (error: any) {
-      if (axios.isAxiosError(error)) {
-        console.error('Error exchanging code:', error.response?.data || error.message);
-      } else {
-        console.error('Error exchanging code:', error);
-      }
+      console.error('Error exchanging code:', error);
       throw error;
     }
   }
@@ -560,6 +577,7 @@ export class RedditService {
   async getUserInfo(accessToken: string): Promise<{ name: string; id: string }> {
     console.log('Getting user info...');
     const response = await this.makeApiRequest<RedditUserResponse>('/api/v1/me', {
+      method: 'GET',
       accessToken
     });
 
@@ -579,7 +597,7 @@ export class RedditService {
       console.log('Fetching subreddits with token:', accessToken ? 'present' : 'missing');
       const response = await this.makeApiRequest<any>('/subreddits/mine/subscriber', {
         method: 'GET',
-        accessToken,
+        accessToken
       });
 
       if (!response.data || !Array.isArray(response.data.children)) {

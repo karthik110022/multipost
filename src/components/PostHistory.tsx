@@ -19,7 +19,6 @@ export function PostHistory() {
   const [posts, setPosts] = useState<PostHistoryType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<string>('all');
 
   const socialMediaService = new SocialMediaService();
 
@@ -41,19 +40,8 @@ export function PostHistory() {
     }
   };
 
-  const handleDelete = async (postId: string) => {
-    try {
-      await socialMediaService.deletePostHistory(postId);
-      toast.success('Post deleted successfully');
-      loadPosts();
-    } catch (error) {
-      console.error('Error deleting post:', error);
-      toast.error('Failed to delete post');
-    }
-  };
-
   const getStatusColor = (status: string) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case 'published':
         return 'bg-green-100 text-green-800';
       case 'pending':
@@ -90,34 +78,16 @@ export function PostHistory() {
     );
   }
 
-  const filteredPosts = posts.filter(post =>
-    filter === 'all' ? true : post.account?.platform === filter.toLowerCase()
-  );
-
   return (
     <div className="p-4">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-4">Post History</h1>
-        <div className="flex items-center space-x-4">
-          <label htmlFor="platform-filter" className="text-sm font-medium text-gray-700">
-            Filter by Platform:
-          </label>
-          <select
-            id="platform-filter"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-          >
-            <option value="all">All Platforms</option>
-            <option value="reddit">Reddit</option>
-          </select>
-        </div>
       </div>
 
       <div className="space-y-6">
-        {filteredPosts.map((post) => (
-          <div key={post.id} className="bg-white shadow rounded-lg p-6 space-y-4">
-            <div className="flex justify-between items-start">
+        {posts.map((post) => (
+          <div key={post.id} className="bg-white shadow rounded-lg p-6">
+            <div className="space-y-4">
               <div>
                 <h3 className="text-lg font-medium text-gray-900">
                   {post.title || 'Untitled Post'}
@@ -135,50 +105,60 @@ export function PostHistory() {
                   </div>
                 )}
               </div>
-              <div className="flex space-x-2">
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(post.status)}`}>
-                  {post.status}
-                </span>
-                {post.account?.platform && (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                    {post.account.platform}
-                  </span>
-                )}
-                {post.errorMessage && (
-                  <span className="text-xs text-red-600">{post.errorMessage}</span>
-                )}
-              </div>
-            </div>
-            <div className="mt-4 flex justify-between items-center text-sm text-gray-500">
-              <div>
-                {(() => {
-                  if (!post.createdAt) return 'Date not available';
-                  try {
-                    return `Posted ${formatDistanceToNow(parseISO(post.createdAt))} ago`;
-                  } catch (error) {
-                    console.error('Error formatting date:', error);
-                    return 'Invalid date';
-                  }
-                })()}
-              </div>
-              <div className="flex items-center space-x-4">
-                {post.postUrl && (
-                  <a
-                    href={post.postUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-indigo-600 hover:text-indigo-900"
-                  >
-                    View on Reddit
-                  </a>
-                )}
-                <button
-                  type="button"
-                  onClick={() => handleDelete(post.id)}
-                  className="text-red-600 hover:text-red-900"
-                >
-                  Delete
-                </button>
+
+              {/* Platform Statuses */}
+              {post.platformStatuses && post.platformStatuses.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">Posted to:</h4>
+                  <div className="space-y-2">
+                    {post.platformStatuses.map((status, index) => (
+                      <div key={index} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-medium capitalize">{status.platform}</span>
+                          {status.subreddit && (
+                            <span className="text-gray-500">r/{status.subreddit}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-4">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(status.status)}`}>
+                            {status.status}
+                          </span>
+                          {status.postUrl && (
+                            <a
+                              href={status.postUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-indigo-600 hover:text-indigo-900"
+                            >
+                              View Post
+                            </a>
+                          )}
+                          {status.errorMessage && (
+                            <span className="text-red-600">{status.errorMessage}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Posted From Accounts */}
+              {post.accounts && post.accounts.length > 0 && (
+                <div className="mt-2">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">Posted from accounts:</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {post.accounts.map((account, index) => (
+                      <span key={index} className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-800">
+                        {account.account_name} ({account.platform})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-4 text-sm text-gray-500">
+                {post.createdAt && formatDistanceToNow(parseISO(post.createdAt), { addSuffix: true })}
               </div>
             </div>
           </div>

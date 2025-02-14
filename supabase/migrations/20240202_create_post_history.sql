@@ -8,7 +8,7 @@ begin
   if not exists (select from pg_tables where schemaname = 'public' and tablename = 'post_history') then
     create table public.post_history (
       id uuid default uuid_generate_v4() primary key,
-      account_id uuid references public.social_accounts(id) on delete cascade,
+      social_account_id uuid references public.social_accounts(id) on delete cascade,
       platform text not null,
       content text not null,
       title text,
@@ -31,7 +31,7 @@ begin
         auth.uid() in (
           select user_id 
           from public.social_accounts 
-          where id = post_history.account_id
+          where id = post_history.social_account_id
         )
       );
 
@@ -42,9 +42,17 @@ begin
         auth.uid() in (
           select user_id 
           from public.social_accounts 
-          where id = account_id
+          where id = social_account_id
         )
       );
+
+    -- Add indexes for better performance
+    create index if not exists idx_post_history_social_account_id on public.post_history(social_account_id);
+    create index if not exists idx_post_history_created_at on public.post_history(created_at desc);
+    create index if not exists idx_post_history_account_created on public.post_history(social_account_id, created_at desc);
   end if;
 end;
 $$;
+
+-- Execute the function
+select public.create_post_history_if_not_exists();

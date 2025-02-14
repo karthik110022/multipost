@@ -19,6 +19,8 @@ export interface PostResult {
   subreddit?: string;
   requiresFlair?: boolean;
   availableFlairs?: Array<{ id: string; text: string }>;
+  id?: string;
+  text?: string;
 }
 
 interface PostPlatformRecord {
@@ -44,6 +46,8 @@ export interface PostHistory {
   publishedAt?: string;
   account?: SocialAccount;
   media_urls?: string[];
+  accounts?: any[];
+  platformStatuses?: any[];
 }
 
 interface RedditPostResult {
@@ -244,116 +248,132 @@ export class SocialMediaService {
   ): Promise<PostResult[]> {
     const results: PostResult[] = [];
 
-    for (const post of posts) {
-      try {
-        if (!post.subreddit) {
-          throw new Error('Subreddit is required');
-        }
+    try {
+      // Get the current user's ID
+      const { data: { user }, error: userError } = await this.supabase.auth.getUser();
+      if (userError) throw userError;
+      if (!user) throw new Error('User not authenticated');
 
-        // Get the account to get the access token
-        const account = await this.getAccount(post.accountId);
-        if (!account?.accessToken) {
-          throw new Error('Account not found or not authenticated');
-        }
+      // First, create the post record with user_id
+      const { data: postRecord, error: postError } = await this.supabase
+        .from('posts')
+        .insert({
+          content: content,
+          created_at: new Date().toISOString(),
+          user_id: user.id  // Add the user_id here
+        })
+        .select()
+        .single();
 
-        // Get the platformPostId from Reddit
-        let platformPostId: string;
-        if (post.flairId) {
-          platformPostId = await this.redditService.submitPost(
-            account.accessToken,
-            post.subreddit,
-            title,
-            content,
-            post.flairId
-          );
-        } else {
-          // If no flair ID is provided, check if the subreddit requires one
-          const flairs = await this.getSubredditFlairs(post.accountId, post.subreddit);
-          if (flairs.length > 0) {
-            // Subreddit requires flair
-            const errorResult: PostResult = {
-              success: false,
-              error: `Flair is required for r/${post.subreddit}`,
+      if (postError) throw postError;
+
+      // Now try to post to each platform
+      for (const post of posts) {
+        try {
+          if (!post.subreddit) {
+            throw new Error('Subreddit is required');
+          }
+
+          // Get the account to get the access token
+          const account = await this.getAccount(post.accountId);
+          if (!account?.accessToken) {
+            throw new Error('Account not found or not authenticated');
+          }
+
+          // Try to post to Reddit
+          let platformPostId: string | undefined;
+          try {
+            if (post.flairId) {
+              platformPostId = await this.redditService.submitPost(
+                account.accessToken,
+                post.subreddit,
+                title,
+                content,
+                post.flairId
+              );
+            } else {
+              // Check if flair is required
+              const flairs = await this.getSubredditFlairs(post.accountId, post.subreddit);
+              if (flairs.length > 0) {
+                const errorResult: PostResult = {
+                  success: false,
+                  error: `Flair is required for r/${post.subreddit}`,
+                  accountId: post.accountId,
+                  subreddit: post.subreddit,
+                  requiresFlair: true,
+                  availableFlairs: flairs,
+                  id: postRecord.id,
+                  text: content
+                };
+                results.push(errorResult);
+                continue;
+              }
+              
+              platformPostId = await this.redditService.submitPost(
+                account.accessToken,
+                post.subreddit,
+                title,
+                content,
+                ''
+              );
+            }
+
+            // Create post_platforms record for successful post
+            await this.supabase
+              .from('post_platforms')
+              .insert({
+                post_id: postRecord.id,
+                social_account_id: post.accountId,
+                platform_post_id: platformPostId,
+                status: 'success',
+                subreddit: post.subreddit,
+                published_at: new Date().toISOString()
+              });
+
+            results.push({
+              success: true,
+              platformPostId,
               accountId: post.accountId,
               subreddit: post.subreddit,
-              requiresFlair: true,
-              availableFlairs: flairs
-            };
-            results.push(errorResult);
-            continue;
+              id: postRecord.id,
+              text: content
+            });
+
+          } catch (postError: any) {
+            // Create post_platforms record for failed post
+            await this.supabase
+              .from('post_platforms')
+              .insert({
+                post_id: postRecord.id,
+                social_account_id: post.accountId,
+                status: 'failed',
+                error_message: postError.message,
+                subreddit: post.subreddit
+              });
+
+            results.push({
+              success: false,
+              error: postError.message,
+              accountId: post.accountId,
+              subreddit: post.subreddit,
+              id: postRecord.id,
+              text: content
+            });
           }
-          
-          // No flair required, proceed with post
-          platformPostId = await this.redditService.submitPost(
-            account.accessToken,
-            post.subreddit,
-            title,
-            content,
-            ''  // Empty string for no flair
-          );
+        } catch (error: any) {
+          results.push({
+            success: false,
+            error: error.message,
+            accountId: post.accountId,
+            subreddit: post.subreddit,
+            id: postRecord.id,
+            text: content
+          });
         }
-
-        // Create successful result
-        const successResult: PostResult = {
-          success: true,
-          platformPostId,
-          accountId: post.accountId,
-          subreddit: post.subreddit
-        };
-        results.push(successResult);
-
-        // Record successful post
-        await this.recordPost({
-          post_id: platformPostId,
-          social_account_id: post.accountId,
-          platform_post_id: platformPostId,
-          status: 'success',
-          subreddit: post.subreddit,
-          flair_id: post.flairId || null
-        });
-
-      } catch (error: any) {
-        console.error('Error creating post:', error);
-        
-        let errorMessage = error.message;
-        let status: PostPlatformRecord['status'] = 'failed';
-
-        // Map specific error types to user-friendly messages
-        switch (error.message) {
-          case 'INSUFFICIENT_KARMA':
-            errorMessage = `Not enough karma to post in r/${post.subreddit}`;
-            status = 'karma_insufficient';
-            break;
-          case 'RATE_LIMITED':
-            errorMessage = 'Rate limited by Reddit. Please wait before posting again.';
-            status = 'rate_limited';
-            break;
-          case 'INVALID_SUBREDDIT':
-            errorMessage = `Subreddit r/${post.subreddit} not found or not accessible`;
-            status = 'invalid_subreddit';
-            break;
-        }
-
-        // Create error result
-        const errorResult: PostResult = {
-          success: false,
-          error: errorMessage,
-          accountId: post.accountId,
-          subreddit: post.subreddit
-        };
-        results.push(errorResult);
-
-        // Record failed post
-        await this.recordPost({
-          post_id: null,
-          social_account_id: post.accountId,
-          platform_post_id: null,
-          status: status,
-          error_message: errorMessage,
-          subreddit: post.subreddit,
-          flair_id: post.flairId || null
-        });
       }
+    } catch (error: any) {
+      console.error('Error creating post:', error);
+      throw error;
     }
 
     return results;
@@ -413,69 +433,61 @@ export class SocialMediaService {
 
   async getPostHistory(): Promise<PostHistory[]> {
     try {
-      // Start from post_platforms to get all posts with their platform info
-      const { data: platforms, error } = await this.supabase
-        .from('post_platforms')
+      const { data: posts, error } = await this.supabase
+        .from('posts')
         .select(`
-          id,
-          platform_post_id,
-          status,
-          error_message,
-          subreddit,
-          published_at,
-          social_account_id,
-          posts (
+          *,
+          post_platforms (
             id,
-            content,
-            media_urls,
-            created_at
-          ),
-          social_accounts (
-            id,
-            platform,
-            account_name,
-            account_id
+            platform_post_id,
+            status,
+            error_message,
+            subreddit,
+            published_at,
+            social_accounts (
+              id,
+              platform,
+              account_name,
+              account_id
+            )
           )
         `)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('Error fetching post history:', error);
-        return [];
-      }
+      if (error) throw error;
 
-      if (!platforms || platforms.length === 0) {
-        console.log('No platforms found');
-        return [];
-      }
+      return posts.map((post: any) => {
+        // Get unique accounts this post was shared from (if any)
+        const accounts = post.post_platforms
+          ? post.post_platforms
+              .map((platform: any) => platform.social_accounts)
+              .filter((account: any) => account !== null)
+          : [];
 
-      return platforms.map((platform: any) => {
-        const post = platform.posts;
-        const account = platform.social_accounts;
-        
+        // Get post statuses across platforms (if any)
+        const statuses = post.post_platforms
+          ? post.post_platforms.map((platform: any) => ({
+              platform: platform.social_accounts?.platform || 'unknown',
+              status: platform.status || 'pending',
+              errorMessage: platform.error_message,
+              postUrl: platform.platform_post_id ? `https://reddit.com/${platform.platform_post_id}` : undefined,
+              subreddit: platform.subreddit
+            }))
+          : [];
+
         return {
-          id: post?.id,
-          content: post?.content || '',
-          title: post?.content?.split('\n')[0] || '', // Use first line of content as title
-          subreddit: platform.subreddit,
-          postUrl: platform.platform_post_id ? `https://reddit.com/${platform.platform_post_id}` : undefined,
-          externalPostId: platform.platform_post_id,
-          status: this.mapPostStatus(platform.status),
-          errorMessage: platform.error_message,
-          createdAt: post?.created_at,
-          publishedAt: platform.published_at,
-          media_urls: post?.media_urls,
-          account: account ? {
-            id: account.id,
-            platform: account.platform,
-            accountName: account.account_name,
-            accountId: account.account_id
-          } : undefined
+          id: post.id,
+          content: post.content,
+          title: post.content?.split('\n')[0] || '',
+          createdAt: post.created_at,
+          media_urls: post.media_urls,
+          accounts: accounts,
+          platformStatuses: statuses
         };
       });
     } catch (error) {
       console.error('Error fetching post history:', error);
-      return [];
+      throw error;
     }
   }
 

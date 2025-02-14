@@ -21,6 +21,7 @@ export interface PostResult {
   availableFlairs?: Array<{ id: string; text: string }>;
   id?: string;
   text?: string;
+  account?: any;
 }
 
 interface PostPlatformRecord {
@@ -254,13 +255,14 @@ export class SocialMediaService {
       if (userError) throw userError;
       if (!user) throw new Error('User not authenticated');
 
-      // First, create the post record with user_id
+      // First, create the post record
       const { data: postRecord, error: postError } = await this.supabase
         .from('posts')
         .insert({
+          title: title,
           content: content,
           created_at: new Date().toISOString(),
-          user_id: user.id  // Add the user_id here
+          user_id: user.id
         })
         .select()
         .single();
@@ -279,6 +281,30 @@ export class SocialMediaService {
           if (!account?.accessToken) {
             throw new Error('Account not found or not authenticated');
           }
+
+          // Create post_platforms entry first with pending status
+          const { data: platformRecord, error: platformError } = await this.supabase
+            .from('post_platforms')
+            .insert({
+              post_id: postRecord.id,
+              social_account_id: post.accountId,
+              status: 'pending',
+              subreddit: post.subreddit,
+              created_at: new Date().toISOString()
+            })
+            .select(`
+              id,
+              social_account_id,
+              social_accounts (
+                id,
+                platform,
+                account_name,
+                account_id
+              )
+            `)
+            .single();
+
+          if (platformError) throw platformError;
 
           // Try to post to Reddit
           let platformPostId: string | undefined;
@@ -306,9 +332,21 @@ export class SocialMediaService {
                   text: content
                 };
                 results.push(errorResult);
+
+                // Update platform record with error
+                await this.supabase
+                  .from('post_platforms')
+                  .update({
+                    status: 'failed',
+                    error_message: `Flair is required for r/${post.subreddit}`,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', platformRecord.id);
+
                 continue;
               }
               
+              // Try posting to Reddit
               platformPostId = await this.redditService.submitPost(
                 account.accessToken,
                 post.subreddit,
@@ -318,38 +356,53 @@ export class SocialMediaService {
               );
             }
 
-            // Create post_platforms record for successful post
-            await this.supabase
-              .from('post_platforms')
-              .insert({
-                post_id: postRecord.id,
-                social_account_id: post.accountId,
-                platform_post_id: platformPostId,
-                status: 'success',
-                subreddit: post.subreddit,
-                published_at: new Date().toISOString()
-              });
+            // If we get here, the post was successful
+            if (platformPostId) {
+              // Update post_platforms record for successful post
+              const { error: updateError } = await this.supabase
+                .from('post_platforms')
+                .update({
+                  platform_post_id: platformPostId,
+                  status: 'success',
+                  published_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', platformRecord.id);
 
-            results.push({
-              success: true,
-              platformPostId,
-              accountId: post.accountId,
-              subreddit: post.subreddit,
-              id: postRecord.id,
-              text: content
-            });
+              if (updateError) {
+                console.error('Error updating post platform status:', updateError);
+              }
+
+              results.push({
+                success: true,
+                platformPostId,
+                accountId: post.accountId,
+                subreddit: post.subreddit,
+                id: postRecord.id,
+                text: content,
+                account: platformRecord.social_accounts
+              });
+            } else {
+              // No platformPostId means the post failed
+              throw new Error('Failed to get post ID from Reddit');
+            }
 
           } catch (postError: any) {
-            // Create post_platforms record for failed post
-            await this.supabase
+            console.error('Error posting to Reddit:', postError);
+            
+            // Update post_platforms record for failed post
+            const { error: updateError } = await this.supabase
               .from('post_platforms')
-              .insert({
-                post_id: postRecord.id,
-                social_account_id: post.accountId,
+              .update({
                 status: 'failed',
                 error_message: postError.message,
-                subreddit: post.subreddit
-              });
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', platformRecord.id);
+
+            if (updateError) {
+              console.error('Error updating post platform status:', updateError);
+            }
 
             results.push({
               success: false,
@@ -357,7 +410,8 @@ export class SocialMediaService {
               accountId: post.accountId,
               subreddit: post.subreddit,
               id: postRecord.id,
-              text: content
+              text: content,
+              account: platformRecord.social_accounts
             });
           }
         } catch (error: any) {
@@ -431,64 +485,52 @@ export class SocialMediaService {
     }
   }
 
-  async getPostHistory(): Promise<PostHistory[]> {
-    try {
-      const { data: posts, error } = await this.supabase
-        .from('posts')
-        .select(`
-          *,
-          post_platforms (
-            id,
-            platform_post_id,
-            status,
-            error_message,
-            subreddit,
-            published_at,
-            social_accounts (
-              id,
-              platform,
-              account_name,
-              account_id
-            )
-          )
-        `)
-        .order('created_at', { ascending: false });
+  async getPostHistory(): Promise<any[]> {
+    const { data: { user } } = await this.supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
 
-      if (error) throw error;
+    // Get all posts with their platform details and account information
+    const { data: posts, error } = await this.supabase
+      .from('posts')
+      .select(`
+        *,
+        post_platforms (
+          id,
+          platform_post_id,
+          status,
+          error_message,
+          subreddit,
+          published_at,
+          social_accounts (*)
+        )
+      `)
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
 
-      return posts.map((post: any) => {
-        // Get unique accounts this post was shared from (if any)
-        const accounts = post.post_platforms
-          ? post.post_platforms
-              .map((platform: any) => platform.social_accounts)
-              .filter((account: any) => account !== null)
-          : [];
-
-        // Get post statuses across platforms (if any)
-        const statuses = post.post_platforms
-          ? post.post_platforms.map((platform: any) => ({
-              platform: platform.social_accounts?.platform || 'unknown',
-              status: platform.status || 'pending',
-              errorMessage: platform.error_message,
-              postUrl: platform.platform_post_id ? `https://reddit.com/${platform.platform_post_id}` : undefined,
-              subreddit: platform.subreddit
-            }))
-          : [];
-
-        return {
-          id: post.id,
-          content: post.content,
-          title: post.content?.split('\n')[0] || '',
-          createdAt: post.created_at,
-          media_urls: post.media_urls,
-          accounts: accounts,
-          platformStatuses: statuses
-        };
-      });
-    } catch (error) {
+    if (error) {
       console.error('Error fetching post history:', error);
       throw error;
     }
+
+    // Log raw data for debugging
+    console.log('Raw posts data:', JSON.stringify(posts, null, 2));
+
+    // Transform the data to include account details
+    return posts.map((post: any) => ({
+      id: post.id,
+      title: post.title || post.content.split('\n')[0],
+      content: post.title ? post.content : post.content.split('\n').slice(1).join('\n').trim(),
+      created_at: post.created_at,
+      platforms: (post.post_platforms || []).map((platform: any) => ({
+        id: platform.id,
+        platform_post_id: platform.platform_post_id,
+        status: platform.status,
+        error_message: platform.error_message,
+        subreddit: platform.subreddit,
+        published_at: platform.published_at,
+        account: platform.social_accounts
+      }))
+    }));
   }
 
   async deletePostHistory(postId: string): Promise<void> {

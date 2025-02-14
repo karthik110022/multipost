@@ -1,7 +1,12 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { PostHistory } from '@/components/PostHistory';
+import dynamic from 'next/dynamic';
+
+// Import PostHistory as a client component
+const PostHistory = dynamic(() => import('@/components/PostHistory'), {
+  ssr: false,
+});
 
 export default async function Posts() {
   const cookieStore = await cookies();

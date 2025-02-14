@@ -1,25 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/context/AuthContext';
-import { formatDistanceToNow, parseISO } from 'date-fns';
-import { toast } from 'react-hot-toast';
-import { createBrowserClient } from '@supabase/ssr';
 import { SocialMediaService } from '@/lib/social-media-service';
-import type { PostHistory as PostHistoryType } from '@/lib/social-media-service';
+import { useAuth } from '@/context/AuthContext';
 
-// Create Supabase client
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-export function PostHistory() {
+function PostHistory() {
   const { user } = useAuth();
-  const [posts, setPosts] = useState<PostHistoryType[]>([]);
+  const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
   const socialMediaService = new SocialMediaService();
 
   useEffect(() => {
@@ -31,139 +19,159 @@ export function PostHistory() {
   const loadPosts = async () => {
     try {
       const posts = await socialMediaService.getPostHistory();
+      console.log('Posts with account details:', posts);
       setPosts(posts);
     } catch (error) {
       console.error('Error loading posts:', error);
-      setError('Failed to load posts');
     } finally {
       setLoading(false);
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'published':
-        return 'bg-green-100 text-green-800';
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'failed':
-        return 'bg-red-100 text-red-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
-    }
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-[#FF4500]"></div>
-      </div>
-    );
+  if (!user) {
+    return <div className="text-center p-4">Please log in to view your post history.</div>;
   }
 
-  if (error) {
-    return (
-      <div className="bg-red-50 text-red-700 p-4 rounded-md">
-        {error}
-      </div>
-    );
+  if (loading) {
+    return <div className="text-center p-4">Loading...</div>;
   }
 
   if (posts.length === 0) {
     return (
-      <div className="text-center py-12">
-        <h3 className="text-lg font-medium text-gray-900">No posts yet</h3>
-        <p className="mt-1 text-sm text-gray-500">Your post history will appear here once you create posts.</p>
+      <div className="text-center p-4 text-gray-500">
+        No posts found. Create a new post to get started!
       </div>
     );
   }
 
   return (
-    <div className="p-4">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-4">Post History</h1>
-      </div>
+    <div className="space-y-6 p-4">
+      {posts.map((post) => {
+        // Debug log for each post
+        console.log('Post details:', {
+          id: post.id,
+          title: post.title,
+          platforms: post.platforms?.map((p: any) => ({
+            subreddit: p.subreddit,
+            accountName: p.account?.accountName,
+            accountId: p.account?.accountId
+          }))
+        });
 
-      <div className="space-y-6">
-        {posts.map((post) => (
-          <div key={post.id} className="bg-white shadow rounded-lg p-6">
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-lg font-medium text-gray-900">
-                  {post.title || 'Untitled Post'}
-                </h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  {post.content}
-                </p>
-                {post.media_urls && post.media_urls.length > 0 && (
-                  <div className="mt-4">
-                    <img 
-                      src={post.media_urls[0]} 
-                      alt="Post media" 
-                      className="max-w-md rounded-lg shadow-md"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Platform Statuses */}
-              {post.platformStatuses && post.platformStatuses.length > 0 && (
-                <div className="mt-4">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">Posted to:</h4>
-                  <div className="space-y-2">
-                    {post.platformStatuses.map((status, index) => (
-                      <div key={index} className="flex items-center justify-between text-sm">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-medium capitalize">{status.platform}</span>
-                          {status.subreddit && (
-                            <span className="text-gray-500">r/{status.subreddit}</span>
-                          )}
-                        </div>
-                        <div className="flex items-center space-x-4">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(status.status)}`}>
-                            {status.status}
-                          </span>
-                          {status.postUrl && (
-                            <a
-                              href={status.postUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-indigo-600 hover:text-indigo-900"
-                            >
-                              View Post
-                            </a>
-                          )}
-                          {status.errorMessage && (
-                            <span className="text-red-600">{status.errorMessage}</span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Posted From Accounts */}
-              {post.accounts && post.accounts.length > 0 && (
-                <div className="mt-2">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">Posted from accounts:</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {post.accounts.map((account, index) => (
-                      <span key={index} className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-800">
-                        {account.account_name} ({account.platform})
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-4 text-sm text-gray-500">
-                {post.createdAt && formatDistanceToNow(parseISO(post.createdAt), { addSuffix: true })}
+        return (
+          <div key={post.id} className="bg-white rounded-lg shadow-md p-6">
+            {/* Post Header with Title and Time */}
+            <div className="mb-4">
+              <h2 className="text-xl font-semibold">{post.title}</h2>
+              <div className="text-sm text-gray-500 mt-1">
+                Created {formatDate(post.created_at)}
               </div>
             </div>
+
+            {/* Post Content */}
+            <div className="whitespace-pre-wrap text-gray-700 mb-6 border-b pb-4">
+              {post.content}
+            </div>
+            
+            {/* Reddit Account Details */}
+            <div className="space-y-4">
+              {post.platforms?.map((platform: any) => {
+                // Debug log for each platform
+                console.log('Platform details:', {
+                  id: platform.id,
+                  subreddit: platform.subreddit,
+                  account: platform.account
+                });
+
+                return (
+                  <div 
+                    key={platform.id} 
+                    className="bg-gray-50 rounded-lg p-4 border"
+                  >
+                    {/* Account Details Header */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center space-x-2">
+                        <div className="bg-[#FF4500] text-white p-1 rounded">
+                          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M10 0C4.478 0 0 4.478 0 10c0 5.523 4.478 10 10 10 5.523 0 10-4.477 10-10 0-5.522-4.477-10-10-10z"/>
+                          </svg>
+                        </div>
+                        <div>
+                          <div className="font-medium text-gray-900">
+                            {platform.account?.account_id || 'Unknown Account'}
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            u/{platform.account?.account_name || 'unknown'}
+                          </div>
+                        </div>
+                      </div>
+                      {platform.subreddit && (
+                        <div className="text-right">
+                          <div className="text-blue-600 font-medium">
+                            r/{platform.subreddit}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {platform.published_at && `Posted ${formatDate(platform.published_at)}`}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Status and Actions */}
+                    <div className="flex items-center justify-between mt-3">
+                      <div className="flex items-center space-x-3">
+                        <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                          platform.status === 'success' 
+                            ? 'bg-green-100 text-green-800'
+                            : platform.status === 'failed'
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {platform.status === 'success' ? 'Posted Successfully' : 
+                           platform.status === 'failed' ? 'Failed to Post' : 
+                           'Pending'}
+                        </div>
+                      </div>
+
+                      {/* View on Reddit Button */}
+                      {platform.status === 'success' && platform.platform_post_id && (
+                        <a
+                          href={`https://reddit.com/${platform.platform_post_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-[#FF4500] hover:bg-[#FF5700] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#FF4500]"
+                        >
+                          View on Reddit
+                        </a>
+                      )}
+                    </div>
+
+                    {/* Error Message */}
+                    {platform.status === 'failed' && platform.error_message && (
+                      <div className="mt-3 text-sm text-red-600 bg-red-50 p-3 rounded">
+                        Error: {platform.error_message}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
+
+export default PostHistory;

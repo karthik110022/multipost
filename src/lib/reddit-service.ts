@@ -199,6 +199,20 @@ interface RedditError {
   message?: string;
 }
 
+interface RedditPostHistoryDetails {
+  id: string;
+  title: string;
+  subreddit: string;
+  subredditDisplayName: string;
+  authorName: string;
+  upvotes: number;
+  downvotes: number;
+  commentCount: number;
+  shareCount: number;
+  createdAt: number;
+  permalink: string;
+}
+
 export class RedditService {
   private readonly rateLimiter: RateLimiter;
   private clientId: string = '';
@@ -613,6 +627,53 @@ export class RedditService {
     } catch (error) {
       console.error('Failed to fetch subreddits:', error);
       return [];
+    }
+  }
+
+  async getPostHistory(accessToken: string): Promise<RedditPostHistoryDetails[]> {
+    const endpoint = 'https://oauth.reddit.com/user/submitted';
+    
+    try {
+      const response = await this.makeApiRequest<{
+        data: {
+          children: Array<{
+            data: {
+              id: string;
+              title: string;
+              subreddit: string;
+              subreddit_name_prefixed: string;
+              author: string;
+              ups: number;
+              downs: number;
+              num_comments: number;
+              created_utc: number;
+              permalink: string;
+              score: number;
+            };
+          }>;
+        };
+      }>(endpoint, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      return response.data.children.map(child => ({
+        id: child.data.id,
+        title: child.data.title,
+        subreddit: child.data.subreddit,
+        subredditDisplayName: child.data.subreddit_name_prefixed,
+        authorName: child.data.author,
+        upvotes: child.data.ups,
+        downvotes: child.data.downs,
+        commentCount: child.data.num_comments,
+        shareCount: child.data.score, // Using score as a proxy for shares since Reddit API doesn't directly expose share count
+        createdAt: child.data.created_utc,
+        permalink: `https://reddit.com${child.data.permalink}`,
+      }));
+    } catch (error) {
+      this.handleApiError(error);
     }
   }
 }

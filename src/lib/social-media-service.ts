@@ -214,8 +214,38 @@ export class SocialMediaService {
         return [];
       }
 
-      console.log('Fetching subreddits with access token');
-      return await this.redditService.getSubreddits(account.access_token);
+      try {
+        // First validate the access token
+        const isValid = await this.redditService.validateAccessToken(account.access_token);
+        
+        if (!isValid && account.refresh_token) {
+          // Token is invalid, try to refresh it
+          console.log('Access token invalid, attempting to refresh...');
+          const newAccessToken = await this.redditService.refreshToken(account.refresh_token);
+          
+          // Update the account with the new access token
+          await this.supabase
+            .from('social_accounts')
+            .update({ access_token: newAccessToken })
+            .eq('id', accountId);
+            
+          // Use the new access token
+          console.log('Fetching subreddits with refreshed token');
+          return await this.redditService.getSubreddits(newAccessToken);
+        }
+        
+        console.log('Fetching subreddits with access token');
+        return await this.redditService.getSubreddits(account.access_token);
+      } catch (error) {
+        if (error instanceof Error) {
+          console.error('Error during subreddit fetch:', error.message);
+          // If we get an auth error even after refresh, the account may need to be re-authenticated
+          if (error.message.includes('401')) {
+            throw new Error('Account needs to be re-authenticated');
+          }
+        }
+        throw error;
+      }
     } catch (error) {
       console.error('Failed to fetch subreddits:', error);
       return [];
@@ -250,39 +280,40 @@ export class SocialMediaService {
     const results: PostResult[] = [];
 
     try {
-      // Get the current user's ID
+      // Get the current user
       const { data: { user }, error: userError } = await this.supabase.auth.getUser();
       if (userError) throw userError;
       if (!user) throw new Error('User not authenticated');
 
-      // First, create the post record
+      // Create the main post record
       const { data: postRecord, error: postError } = await this.supabase
         .from('posts')
         .insert({
-          title: title,
-          content: content,
-          created_at: new Date().toISOString(),
-          user_id: user.id
+          title,
+          content,
+          user_id: user.id,
+          created_at: new Date().toISOString()
         })
         .select()
         .single();
 
       if (postError) throw postError;
 
-      // Now try to post to each platform
+      // Process each platform post
       for (const post of posts) {
         try {
           if (!post.subreddit) {
             throw new Error('Subreddit is required');
           }
 
-          // Get the account to get the access token
+          // Get the account and access token
           const account = await this.getAccount(post.accountId);
           if (!account?.accessToken) {
             throw new Error('Account not found or not authenticated');
           }
 
-          // Create post_platforms entry first with pending status
+          console.log('Creating initial post_platforms record...');
+          // Create initial post_platforms entry
           const { data: platformRecord, error: platformError } = await this.supabase
             .from('post_platforms')
             .insert({
@@ -290,131 +321,92 @@ export class SocialMediaService {
               social_account_id: post.accountId,
               status: 'pending',
               subreddit: post.subreddit,
-              created_at: new Date().toISOString()
+              flair_id: post.flairId || null,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
             })
-            .select(`
-              id,
-              social_account_id,
-              social_accounts (
-                id,
-                platform,
-                account_name,
-                account_id
-              )
-            `)
+            .select('*')
             .single();
 
-          if (platformError) throw platformError;
+          if (platformError) {
+            console.error('Error creating platform record:', platformError);
+            throw platformError;
+          }
 
-          // Try to post to Reddit
-          let platformPostId: string | undefined;
+          console.log('Created platform record:', platformRecord);
+
+          // Attempt to post to Reddit
           try {
-            if (post.flairId) {
-              platformPostId = await this.redditService.submitPost(
-                account.accessToken,
-                post.subreddit,
-                title,
-                content,
-                post.flairId
-              );
-            } else {
-              // Check if flair is required
-              const flairs = await this.getSubredditFlairs(post.accountId, post.subreddit);
-              if (flairs.length > 0) {
-                const errorResult: PostResult = {
-                  success: false,
-                  error: `Flair is required for r/${post.subreddit}`,
-                  accountId: post.accountId,
-                  subreddit: post.subreddit,
-                  requiresFlair: true,
-                  availableFlairs: flairs,
-                  id: postRecord.id,
-                  text: content
-                };
-                results.push(errorResult);
+            console.log('Attempting to post to Reddit...');
+            const platformPostId = await this.redditService.submitPost(
+              account.accessToken,
+              post.subreddit,
+              title,
+              content,
+              post.flairId || ''
+            );
 
-                // Update platform record with error
-                await this.supabase
-                  .from('post_platforms')
-                  .update({
-                    status: 'failed',
-                    error_message: `Flair is required for r/${post.subreddit}`,
-                    updated_at: new Date().toISOString()
-                  })
-                  .eq('id', platformRecord.id);
-
-                continue;
-              }
-              
-              // Try posting to Reddit
-              platformPostId = await this.redditService.submitPost(
-                account.accessToken,
-                post.subreddit,
-                title,
-                content,
-                ''
-              );
-            }
-
-            // If we get here, the post was successful
-            if (platformPostId) {
-              // Update post_platforms record for successful post
-              const { error: updateError } = await this.supabase
-                .from('post_platforms')
-                .update({
-                  platform_post_id: platformPostId,
-                  status: 'success',
-                  published_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                })
-                .eq('id', platformRecord.id);
-
-              if (updateError) {
-                console.error('Error updating post platform status:', updateError);
-              }
-
-              results.push({
-                success: true,
-                platformPostId,
-                accountId: post.accountId,
-                subreddit: post.subreddit,
-                id: postRecord.id,
-                text: content,
-                account: platformRecord.social_accounts
-              });
-            } else {
-              // No platformPostId means the post failed
-              throw new Error('Failed to get post ID from Reddit');
-            }
-
-          } catch (postError: any) {
-            console.error('Error posting to Reddit:', postError);
+            console.log('Successfully posted to Reddit with ID:', platformPostId);
+            console.log('Updating post_platforms record...');
             
-            // Update post_platforms record for failed post
+            // Update the post_platforms record with published status
+            const { data: updatedPlatform, error: updateError } = await this.supabase
+              .from('post_platforms')
+              .update({
+                platform_post_id: platformPostId,
+                status: 'published',
+                published_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', platformRecord.id)
+              .select()
+              .single();
+
+            if (updateError) {
+              console.error('Error updating post status:', updateError);
+              throw updateError;
+            }
+
+            console.log('Updated platform record:', updatedPlatform);
+
+            // Add to results
+            results.push({
+              success: true,
+              platformPostId,
+              accountId: post.accountId,
+              subreddit: post.subreddit,
+              id: postRecord.id,
+              text: content
+            });
+
+          } catch (error: any) {
+            console.error('Error posting to Reddit:', error);
+            
+            // Update post_platforms with error status
             const { error: updateError } = await this.supabase
               .from('post_platforms')
               .update({
                 status: 'failed',
-                error_message: postError.message,
+                error_message: error.message,
                 updated_at: new Date().toISOString()
               })
               .eq('id', platformRecord.id);
 
             if (updateError) {
-              console.error('Error updating post platform status:', updateError);
+              console.error('Error updating error status:', updateError);
             }
 
             results.push({
               success: false,
-              error: postError.message,
+              error: error.message,
               accountId: post.accountId,
               subreddit: post.subreddit,
               id: postRecord.id,
-              text: content,
-              account: platformRecord.social_accounts
+              text: content
             });
           }
         } catch (error: any) {
+          console.error('Error processing post:', error);
           results.push({
             success: false,
             error: error.message,
@@ -425,12 +417,12 @@ export class SocialMediaService {
           });
         }
       }
+
+      return results;
     } catch (error: any) {
-      console.error('Error creating post:', error);
+      console.error('Error in createPost:', error);
       throw error;
     }
-
-    return results;
   }
 
   async handleRedditCallback(

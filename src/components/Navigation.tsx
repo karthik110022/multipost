@@ -36,7 +36,7 @@ export default function Navigation() {
               <Link href="/create-post" className={linkClass('/create-post')}>
                 Create Post
               </Link>
-              <Link href="/posts" className={linkClass('/posts')}>
+              <Link href="/history" className={linkClass('/history')}>
                 Post History
               </Link>
               <Link href="/accounts" className={linkClass('/accounts')}>

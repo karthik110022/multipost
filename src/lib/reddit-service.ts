@@ -213,6 +213,18 @@ interface RedditPostHistoryDetails {
   permalink: string;
 }
 
+interface RedditPostStats {
+  upvotes: number;
+  downvotes: number;
+  comments: number;
+  shares: number;
+  awards: Array<{
+    name: string;
+    count: number;
+    icon_url: string;
+  }>;
+}
+
 export class RedditService {
   private readonly rateLimiter: RateLimiter;
   private clientId: string = '';
@@ -347,12 +359,44 @@ export class RedditService {
   async validateAccessToken(accessToken: string): Promise<boolean> {
     try {
       console.log('Validating Reddit access token...');
-      await this.makeApiRequest('/api/v1/me', { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } });
+      await this.makeApiRequest('/api/v1/me', { 
+        method: 'GET', 
+        accessToken 
+      });
       console.log('✅ Access token is valid');
       return true;
     } catch (error) {
-      console.error('❌ Access token validation failed:', error);
+      console.log('❌ Access token is invalid');
       return false;
+    }
+  }
+
+  async refreshToken(refreshToken: string): Promise<string> {
+    console.log('Refreshing Reddit access token...');
+    const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
+    
+    try {
+      const response = await this.makeApiRequest<RedditTokenResponse>(
+        'https://www.reddit.com/api/v1/access_token',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Basic ${basicAuth}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: `grant_type=refresh_token&refresh_token=${refreshToken}`,
+        }
+      );
+
+      if (!response.access_token) {
+        throw new Error('No access token in refresh response');
+      }
+
+      console.log('✅ Token refreshed successfully');
+      return response.access_token;
+    } catch (error) {
+      console.error('❌ Failed to refresh token:', error);
+      throw new Error('Failed to refresh access token');
     }
   }
 
@@ -370,23 +414,6 @@ export class RedditService {
           'Authorization': `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`
         },
         body: `grant_type=authorization_code&code=${code}&redirect_uri=${this.redirectUri}`
-      });
-
-      return response.access_token;
-    } catch (error) {
-      return this.handleApiError(error);
-    }
-  }
-
-  async refreshToken(refreshToken: string): Promise<string> {
-    try {
-      this.validateCredentials();
-      const response = await this.makeApiRequest<RedditTokenResponse>('https://www.reddit.com/api/v1/access_token', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')}`
-        },
-        body: `grant_type=refresh_token&refresh_token=${refreshToken}`
       });
 
       return response.access_token;
@@ -465,48 +492,80 @@ export class RedditService {
       const response = await this.makeApiRequest<RedditApiResponse>('/api/submit', {
         method: 'POST',
         body: formData.toString(),
-        accessToken // Pass the access token here
+        accessToken
       });
 
       // Log the full response for debugging
       console.log('Reddit API Response:', JSON.stringify(response, null, 2));
 
-      // Check for jQuery-style error responses
-      if (response.jquery) {
-        for (const entry of response.jquery) {
-          if (Array.isArray(entry) && entry.length >= 4 && Array.isArray(entry[3]) && entry[3].length > 0) {
-            const text = entry[3][0];
-            if (typeof text === 'string' && text.length > 0) {
-              if (text.includes("community name isn't recognizable")) {
-                throw new Error(`Subreddit '${subreddit}' not found or isn't accessible. Make sure it exists and you have permission to post.`);
-              }
-              if (text.toLowerCase().includes('karma')) {
-                throw new Error('Not enough karma to post in this subreddit');
-              }
-              if (text.toLowerCase().includes('rate')) {
-                throw new Error('Rate limited by Reddit. Please wait before posting again');
-              }
-              throw new Error(text);
-            }
-          }
-        }
-      }
-
-      // Check for API errors in the standard format
+      // Check for errors in the response
       if (response?.json?.errors && response.json.errors.length > 0) {
         const [errorCode, errorMessage] = response.json.errors[0];
         throw new Error(errorMessage || errorCode);
       }
 
-      // Check for successful post ID
-      const postId = response?.json?.data?.name || response?.json?.data?.url;
-      if (!postId) {
+      // Get the post ID from the response
+      const fullName = response?.json?.data?.name;
+      if (!fullName) {
         throw new Error('Failed to get post ID from Reddit response');
       }
+
+      // Reddit returns the post name in format 't3_postid'
+      // We need to extract just the post id part
+      const postId = fullName.replace('t3_', '');
+      console.log('Successfully created Reddit post with ID:', postId);
 
       return postId;
     } catch (error: any) {
       console.error('Error in submitPost:', error);
+      throw error;
+    }
+  }
+
+  async getPostStats(accessToken: string, postId: string): Promise<RedditPostStats> {
+    try {
+      console.log('Fetching stats for post:', postId);
+      
+      // Make sure we're using just the ID part, not the fullname
+      const cleanPostId = postId.replace('t3_', '');
+      
+      console.log('Making API request for post:', cleanPostId);
+      const response = await this.makeApiRequest<any>(`/by_id/t3_${cleanPostId}`, {
+        method: 'GET',
+        accessToken
+      });
+
+      console.log('API Response:', JSON.stringify(response, null, 2));
+
+      if (!response?.data?.children || response.data.children.length === 0) {
+        console.error('No post data found in response:', response);
+        throw new Error('Post not found or may have been deleted');
+      }
+
+      const postData = response.data.children[0].data;
+      if (!postData) {
+        console.error('Invalid post data structure:', response.data.children[0]);
+        throw new Error('Invalid post data structure received');
+      }
+      
+      console.log('Retrieved post data:', postData);
+      
+      return {
+        upvotes: postData.ups || 0,
+        downvotes: postData.downs || 0,
+        comments: postData.num_comments || 0,
+        shares: 0, // Reddit API doesn't provide share count
+        awards: (postData.all_awardings || []).map((award: any) => ({
+          name: award.name,
+          count: award.count,
+          icon_url: award.icon_url
+        }))
+      };
+    } catch (error: any) {
+      console.error('Error fetching post stats:', error);
+      if (error.response?.status === 404) {
+        throw new Error('Post not found or may have been deleted');
+      }
       throw error;
     }
   }

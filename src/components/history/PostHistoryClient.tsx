@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { format, parseISO } from 'date-fns';
 import { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import { PostStatistics } from '@/components/PostStatistics';
 
 interface Post {
   id: string;
@@ -17,6 +18,21 @@ interface Post {
   media_urls?: string[];
   url?: string;
   subreddit?: string;
+  external_post_id?: string;
+  account_id?: string;
+  post_platforms?: {
+    id: string;
+    platform_post_id: string;
+    status: string;
+    error_message: string;
+    subreddit: string;
+    social_account_id: string;
+    published_at: string;
+    social_accounts?: {
+      platform: string;
+      account_name: string;
+    };
+  }[];
 }
 
 interface PostHistoryClientProps {
@@ -27,6 +43,7 @@ interface PostHistoryClientProps {
 export default function PostHistoryClient({ user, initialPosts }: PostHistoryClientProps) {
   const [posts, setPosts] = useState<Post[]>(initialPosts);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('all');
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -44,44 +61,145 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
   };
 
   useEffect(() => {
-    const postsSubscription = supabase
-      .channel('posts-channel')
+    async function fetchPosts() {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        console.log('Fetching posts...');
+        const { data: posts, error } = await supabase
+          .from('posts')
+          .select(`
+            *,
+            post_platforms (
+              id,
+              platform_post_id,
+              status,
+              error_message,
+              subreddit,
+              social_account_id,
+              published_at,
+              social_accounts (
+                platform,
+                account_name
+              )
+            )
+          `)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('Error fetching posts:', error);
+          throw error;
+        }
+
+        console.log('Fetched posts:', posts);
+        setPosts(posts || []);
+      } catch (error) {
+        console.error('Error in fetchPosts:', error);
+        setError('Failed to load posts');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    // Initial fetch
+    fetchPosts();
+
+    // Subscribe to post_platforms changes
+    const subscription = supabase
+      .channel('post-platforms-changes')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'posts',
-          filter: `user_id=eq.${user.id}`,
+          table: 'post_platforms'
         },
-        (payload: RealtimePostgresChangesPayload<Post>) => {
-          if (payload.eventType === 'INSERT') {
-            setPosts((current) => [payload.new as Post, ...current]);
-          } else if (payload.eventType === 'DELETE') {
-            setPosts((current) =>
-              current.filter((post) => post.id !== (payload.old as Post).id)
-            );
-          } else if (payload.eventType === 'UPDATE') {
-            setPosts((current) =>
-              current.map((post) =>
-                post.id === (payload.new as Post).id ? (payload.new as Post) : post
-              )
-            );
+        async (payload) => {
+          console.log('Received post_platforms update:', payload);
+          
+          if (payload.eventType === 'UPDATE') {
+            // Fetch the complete post data that contains this platform
+            const { data: updatedPost, error } = await supabase
+              .from('posts')
+              .select(`
+                *,
+                post_platforms (
+                  id,
+                  platform_post_id,
+                  status,
+                  error_message,
+                  subreddit,
+                  social_account_id,
+                  published_at,
+                  social_accounts (
+                    platform,
+                    account_name
+                  )
+                )
+              `)
+              .eq('id', payload.new.post_id)
+              .single();
+
+            if (error) {
+              console.error('Error fetching updated post:', error);
+              return;
+            }
+
+            if (updatedPost) {
+              console.log('Updating post in state:', updatedPost);
+              setPosts(currentPosts => 
+                currentPosts.map(post => 
+                  post.id === updatedPost.id ? updatedPost : post
+                )
+              );
+            }
           }
         }
       )
       .subscribe();
 
     return () => {
-      postsSubscription.unsubscribe();
+      console.log('Cleaning up subscriptions...');
+      subscription.unsubscribe();
     };
-  }, [supabase, user.id]);
+  }, [supabase]);
 
-  const filteredPosts = posts.filter((post) =>
-    filter === 'all' ? true : post.platform === filter
-  );
+  // Filter posts based on platform
+  const filteredPosts = posts.filter((post) => {
+    if (filter === 'all') return true;
+    const platform = post.post_platforms?.[0]?.social_accounts?.platform || post.platform;
+    return platform.toLowerCase() === filter.toLowerCase();
+  });
 
-  const getPlatformColor = (platform: string) => {
+  const getPostStatus = (post: Post) => {
+    if (!post.post_platforms || post.post_platforms.length === 0) {
+      return 'pending';
+    }
+    
+    // Get the latest platform status
+    const latestPlatform = post.post_platforms[0];
+    return latestPlatform.status || 'pending';
+  };
+
+  const getPostUrl = (post: Post) => {
+    const platformPostId = post.post_platforms?.[0]?.platform_post_id;
+    if (!platformPostId) return null;
+    
+    return `https://reddit.com/${platformPostId}`;
+  };
+
+  const getPostSubreddit = (post: Post) => {
+    return post.post_platforms?.[0]?.subreddit || post.subreddit;
+  };
+
+  const getPostAccount = (post: Post) => {
+    return post.post_platforms?.[0]?.social_accounts;
+  };
+
+  const getPlatformColor = (platform: string | undefined) => {
+    if (!platform) return 'bg-gray-100 text-gray-800';
+    
     switch (platform.toLowerCase()) {
       case 'reddit':
         return 'bg-orange-100 text-orange-800';
@@ -90,7 +208,9 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: string | undefined) => {
+    if (!status) return 'bg-gray-100 text-gray-800';
+    
     switch (status.toLowerCase()) {
       case 'success':
         return 'bg-green-100 text-green-800';
@@ -98,6 +218,12 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
         return 'bg-red-100 text-red-800';
       case 'pending':
         return 'bg-yellow-100 text-yellow-800';
+      case 'karma_insufficient':
+        return 'bg-orange-100 text-orange-800';
+      case 'rate_limited':
+        return 'bg-purple-100 text-purple-800';
+      case 'invalid_subreddit':
+        return 'bg-red-100 text-red-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
@@ -128,73 +254,78 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
         <div className="flex justify-center items-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
         </div>
+      ) : error ? (
+        <div className="text-center py-8 text-gray-500">
+          {error}
+        </div>
       ) : filteredPosts.length > 0 ? (
         <div className="space-y-4">
-          {filteredPosts.map((post) => (
-            <div
-              key={post.id}
-              className="bg-white shadow rounded-lg p-6 hover:shadow-md transition-shadow"
-            >
-              <div className="flex justify-between items-start mb-4">
-                <h2 className="text-xl font-semibold">{post.title || 'Untitled Post'}</h2>
-                <div className="flex space-x-2">
-                  <span
-                    className={`px-2 py-1 rounded-full text-xs font-medium ${getPlatformColor(
-                      post.platform
-                    )}`}
-                  >
-                    {post.platform}
-                  </span>
-                  <span
-                    className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
-                      post.status
-                    )}`}
-                  >
-                    {post.status}
-                  </span>
+          {filteredPosts.map((post) => {
+            const status = getPostStatus(post);
+            const postUrl = getPostUrl(post);
+            const subreddit = getPostSubreddit(post);
+            const account = getPostAccount(post);
+            
+            return (
+              <div
+                key={post.id}
+                className="bg-white shadow rounded-lg p-6 hover:shadow-md transition-shadow"
+              >
+                <div className="flex justify-between items-start mb-4">
+                  <h2 className="text-xl font-semibold">{post.title || 'Untitled Post'}</h2>
+                  <div className="flex space-x-2">
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs font-medium ${getPlatformColor(
+                        account?.platform || post.platform
+                      )}`}
+                    >
+                      {account?.platform || post.platform}
+                    </span>
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(status)}`}
+                    >
+                      {status}
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <p className="text-gray-600 mb-4">{post.content}</p>
-              <div className="flex justify-between items-center text-sm text-gray-500">
-                <div>
-                  <p>Created: {formatDate(post.created_at)}</p>
-                  {post.scheduled_for && (
-                    <p>Scheduled for: {formatDate(post.scheduled_for)}</p>
-                  )}
-                </div>
-                {post.url && (
-                  <a
-                    href={post.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-indigo-600 hover:text-indigo-800"
-                  >
-                    View Post →
-                  </a>
+                <p className="text-gray-600 mb-4">{post.content}</p>
+                {post.post_platforms?.[0]?.error_message && (
+                  <p className="text-red-600 text-sm mb-4">{post.post_platforms[0].error_message}</p>
                 )}
-              </div>
-              {post.subreddit && (
-                <div className="mt-2 text-sm text-gray-500">
-                  Posted to r/{post.subreddit}
-                </div>
-              )}
-              {post.media_urls && post.media_urls.length > 0 && (
-                <div className="mt-4 flex gap-2 flex-wrap">
-                  {post.media_urls.map((url, index) => (
+                <div className="flex justify-between items-center text-sm text-gray-500">
+                  <div>
+                    <p>Created: {formatDate(post.created_at)}</p>
+                    {post.post_platforms?.[0]?.published_at && (
+                      <p>Published: {formatDate(post.post_platforms[0].published_at)}</p>
+                    )}
+                  </div>
+                  {postUrl && (
                     <a
-                      key={index}
-                      href={url}
+                      href={postUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm text-indigo-600 hover:text-indigo-800"
+                      className="text-indigo-600 hover:text-indigo-800"
                     >
-                      Media {index + 1}
+                      View Post →
                     </a>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
+                {subreddit && (
+                  <div className="mt-2 text-sm text-gray-500">
+                    Posted to r/{subreddit}
+                  </div>
+                )}
+                {post.post_platforms?.[0]?.platform_post_id && post.post_platforms?.[0]?.social_account_id && (
+                  <div className="mt-4">
+                    <PostStatistics 
+                      postId={post.id} 
+                      accountId={post.post_platforms[0].social_account_id} 
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="text-center py-8 text-gray-500">

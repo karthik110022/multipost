@@ -54,7 +54,8 @@ export async function POST(request: Request) {
     }
 
     const socialMediaService = new SocialMediaService(supabase);
-    const result = await socialMediaService.createPost(content, title, posts);
+    // Fix parameter order: title, content, posts (was passing content first)
+    const result = await socialMediaService.createPost(title, content, posts);
 
     return NextResponse.json(result);
   } catch (error: any) {

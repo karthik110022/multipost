@@ -135,7 +135,7 @@ export class SocialMediaService {
         .from('social_accounts')
         .select('*')
         .eq('id', accountId)
-        .single();
+        .maybeSingle();
 
       if (error || !account) {
         throw new Error('Account not found');
@@ -157,7 +157,7 @@ export class SocialMediaService {
         .from('social_accounts')
         .select('*')
         .eq('id', activeAccountId)
-        .single();
+        .maybeSingle();
 
       if (error || !account) {
         localStorage.removeItem('activeAccountId');
@@ -189,7 +189,7 @@ export class SocialMediaService {
       .from('social_accounts')
       .select('*')
       .eq('id', accountId)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error('Error fetching account:', error);
@@ -207,7 +207,7 @@ export class SocialMediaService {
         .from('social_accounts')
         .select('*')
         .eq('id', accountId)
-        .single();
+        .maybeSingle();
 
       if (!account || !account.access_token) {
         console.error('No access token found for account:', accountId);
@@ -258,7 +258,7 @@ export class SocialMediaService {
         .from('social_accounts')
         .select('*')
         .eq('id', accountId)
-        .single();
+        .maybeSingle();
 
       if (!account || !account.access_token) {
         console.error('No access token found for account:', accountId);
@@ -295,9 +295,10 @@ export class SocialMediaService {
           created_at: new Date().toISOString()
         })
         .select()
-        .single();
+        .maybeSingle();
 
       if (postError) throw postError;
+      if (!postRecord) throw new Error('Failed to create post record');
 
       // Process each platform post
       for (const post of posts) {
@@ -326,11 +327,14 @@ export class SocialMediaService {
               updated_at: new Date().toISOString()
             })
             .select('*')
-            .single();
+            .maybeSingle();
 
           if (platformError) {
             console.error('Error creating platform record:', platformError);
             throw platformError;
+          }
+          if (!platformRecord) {
+            throw new Error('Failed to create platform record');
           }
 
           console.log('Created platform record:', platformRecord);
@@ -347,37 +351,38 @@ export class SocialMediaService {
             );
 
             console.log('Successfully posted to Reddit with ID:', platformPostId);
-            console.log('Updating post_platforms record...');
             
-            // Update the post_platforms record with published status
-            const { data: updatedPlatform, error: updateError } = await this.supabase
-              .from('post_platforms')
-              .update({
-                platform_post_id: platformPostId,
-                status: 'published',
-                published_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', platformRecord.id)
-              .select()
-              .single();
+            try {
+              // Update the post_platforms record with success status
+              const { error: updateError } = await this.supabase
+                .from('post_platforms')
+                .update({
+                  platform_post_id: platformPostId,
+                  status: 'published',  // Changed from 'success' to 'published'
+                  published_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                  error_message: null
+                })
+                .eq('id', platformRecord.id);
 
-            if (updateError) {
-              console.error('Error updating post status:', updateError);
-              throw updateError;
+              if (updateError) {
+                console.error('Error updating platform record:', updateError);
+                throw new Error(`Failed to update platform record: ${updateError.message}`);
+              }
+
+              // Add to results
+              results.push({
+                success: true,
+                platformPostId,
+                accountId: post.accountId,
+                subreddit: post.subreddit,
+                id: postRecord.id,
+                text: content
+              });
+            } catch (updateError) {
+              console.error('Error updating platform record:', updateError);
+              throw new Error('Failed to update platform record');
             }
-
-            console.log('Updated platform record:', updatedPlatform);
-
-            // Add to results
-            results.push({
-              success: true,
-              platformPostId,
-              accountId: post.accountId,
-              subreddit: post.subreddit,
-              id: postRecord.id,
-              text: content
-            });
 
           } catch (error: any) {
             console.error('Error posting to Reddit:', error);
@@ -442,7 +447,7 @@ export class SocialMediaService {
         .select('*')
         .eq('user_id', userId)
         .eq('account_id', userInfo.id)
-        .single();
+        .maybeSingle();
 
       if (existingAccount) {
         return {

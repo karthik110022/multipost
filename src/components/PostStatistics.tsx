@@ -51,12 +51,55 @@ export function PostStatistics({ postId, accountId }: PostStatsProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY = 2000; // 2 seconds
+  const MAX_RETRIES = 10;
+  const RETRY_DELAY = 1000; // 1 second
 
   useEffect(() => {
     let isMounted = true;
     let retryTimeout: NodeJS.Timeout;
+    let currentSubscription: any = null;
+
+    const setupSubscription = (platformId: string) => {
+      // Clean up existing subscription if any
+      if (currentSubscription) {
+        console.log('Cleaning up existing subscription');
+        currentSubscription.unsubscribe();
+      }
+
+      console.log('Setting up new subscription for platform:', platformId);
+      currentSubscription = supabase
+        .channel(`post-stats-${platformId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'post_platforms',
+            filter: `id=eq.${platformId}`
+          },
+          async (payload) => {
+            console.log('Post platform update received:', {
+              event: payload.eventType,
+              old: payload.old,
+              new: payload.new,
+              timestamp: new Date().toISOString()
+            });
+            
+            if (isMounted) {
+              console.log('Component is mounted, refreshing data...');
+              // Force an immediate check
+              await fetchStats();
+              // Reset retry count to allow more retries if needed
+              setRetryCount(0);
+            } else {
+              console.log('Component is unmounted, ignoring update');
+            }
+          }
+        )
+        .subscribe((status) => {
+          console.log('Subscription status:', status);
+        });
+    };
 
     const fetchStats = async () => {
       if (!postId || !accountId) {
@@ -66,56 +109,30 @@ export function PostStatistics({ postId, accountId }: PostStatsProps) {
         return;
       }
 
-      if (isMounted) {
-        setLoading(true);
-        setError(null);
-      }
-
       try {
-        console.log('Checking post status...', { postId, accountId });
+        console.log('Checking post status...', { postId, accountId, retryCount });
         
-        const { data: postData, error: postError } = await supabase
-          .from('posts')
+        // Direct query for the platform record
+        const { data: platformData, error: platformError } = await supabase
+          .from('post_platforms')
           .select(`
             *,
-            post_platforms (
-              id,
-              platform_post_id,
-              status,
-              error_message,
-              subreddit,
-              social_account_id,
-              published_at,
-              social_accounts (
-                platform,
-                account_name
-              )
+            social_accounts (
+              platform,
+              account_name
             )
           `)
-          .eq('id', postId)
-          .maybeSingle();
+          .eq('post_id', postId)
+          .eq('social_account_id', accountId)
+          .single();
 
-        if (postError) {
-          console.error('Error fetching post:', postError);
-          setError(postError.message);
+        if (platformError) {
+          console.error('Error fetching platform data:', platformError);
+          setError(platformError.message);
           setLoading(false);
           return;
         }
 
-        console.log('Post data:', postData);
-
-        if (!postData) {
-          const error = new Error('Post not found');
-          console.error(error);
-          setError(error.message);
-          setLoading(false);
-          return;
-        }
-
-        const platformData = postData.post_platforms?.find(
-          (platform: PlatformData) => platform.social_account_id === accountId
-        );
-        
         console.log('Platform data:', platformData);
         
         if (!platformData) {
@@ -126,26 +143,33 @@ export function PostStatistics({ postId, accountId }: PostStatsProps) {
           return;
         }
 
+        // Set up subscription for this platform
+        setupSubscription(platformData.id);
+
         if (platformData.status !== 'published') {
-          console.log('Post not yet published. Status:', platformData.status);
+          console.log('Post not yet published.', {
+            currentStatus: platformData.status,
+            retryCount,
+            maxRetries: MAX_RETRIES,
+            platformPostId: platformData.platform_post_id
+          });
+
           if (platformData.status === 'failed') {
-            const error = new Error('Post failed to publish');
-            setError(error.message);
+            setError('Post failed to publish');
             setLoading(false);
             return;
+          }
+
+          // Only retry for pending posts
+          if (retryCount < MAX_RETRIES) {
+            console.log(`Retrying in ${RETRY_DELAY}ms (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
+            setRetryCount(prev => prev + 1);
+            retryTimeout = setTimeout(fetchStats, RETRY_DELAY);
+            return;
           } else {
-            // Only retry for pending/draft posts
-            if (retryCount < MAX_RETRIES) {
-              console.log(`Retrying in ${RETRY_DELAY}ms (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
-              setRetryCount(prev => prev + 1);
-              retryTimeout = setTimeout(fetchStats, RETRY_DELAY);
-              return;
-            } else {
-              const error = new Error(`Post is ${platformData.status}`);
-              setError(error.message);
-              setLoading(false);
-              return;
-            }
+            setError(`Post is ${platformData.status}`);
+            setLoading(false);
+            return;
           }
         }
 
@@ -190,36 +214,16 @@ export function PostStatistics({ postId, accountId }: PostStatsProps) {
 
     fetchStats();
     
-    // Set up real-time subscription for post_platforms changes
-    const subscription = supabase
-      .channel('post-stats-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'post_platforms',
-          filter: `post_id=eq.${postId} AND social_account_id=eq.${accountId}`
-        },
-        (payload) => {
-          console.log('Post platform update:', payload);
-          // Reset retry count and fetch stats when the post status changes
-          if (isMounted) {
-            setRetryCount(0);
-            fetchStats();
-          }
-        }
-      )
-      .subscribe();
-
     return () => {
       isMounted = false;
       if (retryTimeout) {
-        console.log('Cleaning up subscription');
+        console.log('Cleaning up retry timeout');
         clearTimeout(retryTimeout);
       }
-      console.log('Cleaning up subscription');
-      subscription.unsubscribe();
+      console.log('Cleaning up Supabase subscription');
+      if (currentSubscription) {
+        currentSubscription.unsubscribe();
+      }
     };
   }, [postId, accountId, retryCount]);
 

@@ -28,7 +28,7 @@ interface PostPlatformRecord {
   post_id: string | null;
   social_account_id: string;
   platform_post_id: string | null;
-  status: 'success' | 'failed' | 'karma_insufficient' | 'rate_limited' | 'invalid_subreddit';
+  status: 'pending' | 'published' | 'failed' | 'karma_insufficient' | 'rate_limited' | 'invalid_subreddit';
   error_message?: string;
   subreddit: string;
   flair_id: string | null;
@@ -353,22 +353,73 @@ export class SocialMediaService {
             console.log('Successfully posted to Reddit with ID:', platformPostId);
             
             try {
-              // Update the post_platforms record with success status
-              const { error: updateError } = await this.supabase
-                .from('post_platforms')
-                .update({
-                  platform_post_id: platformPostId,
-                  status: 'published',  // Changed from 'success' to 'published'
-                  published_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                  error_message: null
-                })
-                .eq('id', platformRecord.id);
+              console.log('Attempting to update post status to published...', {
+                platformRecordId: platformRecord.id,
+                platformPostId,
+                currentStatus: platformRecord.status
+              });
 
-              if (updateError) {
-                console.error('Error updating platform record:', updateError);
-                throw new Error(`Failed to update platform record: ${updateError.message}`);
+              // Prepare update data
+              const updateData = {
+                id: platformRecord.id, // Include id for upsert
+                post_id: platformRecord.post_id, // Include all required fields
+                social_account_id: platformRecord.social_account_id,
+                platform_post_id: platformPostId,
+                status: 'published',
+                published_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                error_message: null,
+                flair_id: platformRecord.flair_id,
+                subreddit: platformRecord.subreddit
+              };
+              
+              console.log('Updating with data:', updateData);
+
+              // Try upsert instead of update
+              const { data: upsertResult, error: upsertError } = await this.supabase
+                .from('post_platforms')
+                .upsert(updateData, {
+                  onConflict: 'id',
+                  ignoreDuplicates: false
+                })
+                .select();
+
+              console.log('Upsert result:', upsertResult);
+              
+              if (upsertError) {
+                console.error('Error upserting platform record:', upsertError);
+                throw new Error(`Failed to upsert platform record: ${upsertError.message}`);
               }
+
+              // Verify the update
+              const { data: verifiedRecord, error: verifyError } = await this.supabase
+                .from('post_platforms')
+                .select('*')
+                .eq('id', platformRecord.id)
+                .single();
+
+              if (verifyError) {
+                console.error('Error verifying record:', verifyError);
+                throw new Error(`Failed to verify record: ${verifyError.message}`);
+              }
+
+              console.log('Verification result:', verifiedRecord);
+
+              if (!verifiedRecord) {
+                console.error('Record not found after update');
+                throw new Error('Failed to update platform record - record not found');
+              }
+
+              if (verifiedRecord.status !== 'published' || verifiedRecord.platform_post_id !== platformPostId) {
+                console.error('Update verification failed:', {
+                  record: verifiedRecord,
+                  expectedStatus: 'published',
+                  expectedPostId: platformPostId
+                });
+                throw new Error('Update verification failed - record not updated correctly');
+              }
+
+              console.log('Successfully updated post status:', verifiedRecord);
 
               // Add to results
               results.push({

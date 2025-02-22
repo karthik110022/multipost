@@ -234,6 +234,29 @@ interface RedditComment {
   replies?: RedditComment[];
 }
 
+interface SubredditActivityData {
+  activeUsers: number;
+  posts: Array<{
+    id: string;
+    created_utc: number;
+    score: number;
+    num_comments: number;
+  }>;
+}
+
+interface SubredditEngagementMetrics {
+  avgScore: number;
+  avgComments: number;
+  peakHours: Array<{
+    hour: number;
+    engagement: number;
+  }>;
+  topKeywords: Array<{
+    keyword: string;
+    frequency: number;
+  }>;
+}
+
 export class RedditService {
   private readonly rateLimiter: RateLimiter;
   private clientId: string = '';
@@ -789,6 +812,229 @@ export class RedditService {
     } catch (error) {
       console.error('Error fetching comments:', error);
       return [];
+    }
+  }
+
+  async getSubredditActivity(accessToken: string, subreddit: string): Promise<SubredditActivityData> {
+    try {
+      console.log('Fetching real-time data from Reddit for subreddit:', subreddit);
+      
+      // Fetch subreddit about data to get active users
+      const aboutData = await this.makeApiRequest<any>(`/r/${subreddit}/about`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+        accessToken,
+      });
+      
+      console.log('Reddit API Response - Active Users:', aboutData.data.active_user_count);
+
+      // Fetch recent posts to analyze activity
+      const recentPosts = await this.makeApiRequest<any>(`/r/${subreddit}/new?limit=100`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+        accessToken,
+      });
+      
+      console.log('Reddit API Response - Number of posts fetched:', recentPosts.data.children.length);
+
+      const activeUsers = aboutData.data.active_user_count || 0;
+      
+      return {
+        activeUsers,
+        posts: recentPosts.data.children.map((child: any) => ({
+          id: child.data.id,
+          created_utc: child.data.created_utc,
+          score: child.data.score,
+          num_comments: child.data.num_comments
+        }))
+      };
+    } catch (error) {
+      console.error('Error fetching subreddit activity:', error);
+      return { activeUsers: 0, posts: [] };
+    }
+  }
+
+  async analyzeBestPostingTime(accessToken: string, subreddit: string): Promise<Array<{
+    dayOfWeek: string;
+    hourOfDay: number;
+    score: number;
+    activeUsers: number;
+  }>> {
+    try {
+      // Fetch posts from different time periods for better analysis
+      const [topPosts, hotPosts] = await Promise.all([
+        this.makeApiRequest<any>(`/r/${subreddit}/top?t=month&limit=100`, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+          accessToken,
+        }),
+        this.makeApiRequest<any>(`/r/${subreddit}/hot?limit=100`, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+          accessToken,
+        })
+      ]);
+
+      // Combine all posts
+      const allPosts = [...topPosts.data.children, ...hotPosts.data.children]
+        .map(child => child.data);
+
+      // Create a map to store engagement by day and hour
+      const activityMap = new Map<string, Map<number, {
+        totalScore: number;
+        totalComments: number;
+        count: number;
+        activeUsers: number;
+      }>>();
+
+      const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+      // Analyze each post
+      allPosts.forEach(post => {
+        const date = new Date(post.created_utc * 1000);
+        const day = days[date.getUTCDay()];
+        const hour = date.getUTCHours();
+        
+        if (!activityMap.has(day)) {
+          activityMap.set(day, new Map());
+        }
+        
+        const dayMap = activityMap.get(day)!;
+        if (!dayMap.has(hour)) {
+          dayMap.set(hour, {
+            totalScore: 0,
+            totalComments: 0,
+            count: 0,
+            activeUsers: 0
+          });
+        }
+
+        const hourData = dayMap.get(hour)!;
+        hourData.totalScore += post.score;
+        hourData.totalComments += post.num_comments;
+        hourData.count += 1;
+        hourData.activeUsers = Math.max(hourData.activeUsers, post.subreddit_subscribers || 0);
+      });
+
+      // Convert the activity map to sorted recommendations
+      const recommendations: Array<{
+        dayOfWeek: string;
+        hourOfDay: number;
+        score: number;
+        activeUsers: number;
+      }> = [];
+
+      activityMap.forEach((dayMap, day) => {
+        dayMap.forEach((data, hour) => {
+          const avgScore = data.count > 0 ? 
+            (data.totalScore + data.totalComments * 2) / data.count : 0;
+
+          recommendations.push({
+            dayOfWeek: day,
+            hourOfDay: hour,
+            score: avgScore,
+            activeUsers: data.activeUsers
+          });
+        });
+      });
+
+      // Sort by score and return top recommendations
+      return recommendations
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 10);
+
+    } catch (error) {
+      console.error('Error analyzing best posting time:', error);
+      return [];
+    }
+  }
+
+  async analyzeSubredditEngagement(accessToken: string, subreddit: string): Promise<SubredditEngagementMetrics> {
+    try {
+      // Get posts from different time periods for better analysis
+      const [topPosts, newPosts, hotPosts] = await Promise.all([
+        this.makeApiRequest<any>(`/r/${subreddit}/top?t=month&limit=100`, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+          accessToken,
+        }),
+        this.makeApiRequest<any>(`/r/${subreddit}/new?limit=100`, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+          accessToken,
+        }),
+        this.makeApiRequest<any>(`/r/${subreddit}/hot?limit=100`, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+          accessToken,
+        })
+      ]);
+
+      // Combine all posts
+      const allPosts = [
+        ...topPosts.data.children,
+        ...newPosts.data.children,
+        ...hotPosts.data.children
+      ].map(child => child.data);
+
+      // Calculate average metrics
+      const avgScore = allPosts.reduce((sum, post) => sum + post.score, 0) / allPosts.length;
+      const avgComments = allPosts.reduce((sum, post) => sum + post.num_comments, 0) / allPosts.length;
+
+      // Analyze peak hours
+      const hourlyEngagement = new Map<number, { total: number; count: number }>();
+      allPosts.forEach(post => {
+        const hour = new Date(post.created_utc * 1000).getHours();
+        const engagement = post.score + post.num_comments;
+        const current = hourlyEngagement.get(hour) || { total: 0, count: 0 };
+        hourlyEngagement.set(hour, {
+          total: current.total + engagement,
+          count: current.count + 1
+        });
+      });
+
+      const peakHours = Array.from(hourlyEngagement.entries())
+        .map(([hour, data]) => ({
+          hour,
+          engagement: data.total / data.count
+        }))
+        .sort((a, b) => b.engagement - a.engagement)
+        .slice(0, 6);
+
+      // Analyze common keywords in successful posts
+      const wordFrequency = new Map<string, number>();
+      const commonWords = new Set(['the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'i', 'it', 'for', 'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at']);
+      
+      allPosts
+        .filter(post => post.score > avgScore) // Only analyze high-performing posts
+        .forEach(post => {
+          const words: string[] = post.title.toLowerCase().split(/\W+/);
+          words.forEach((word: string) => {
+            if (word.length > 3 && !commonWords.has(word)) {
+              wordFrequency.set(word, (wordFrequency.get(word) || 0) + 1);
+            }
+          });
+        });
+
+      const topKeywords = Array.from(wordFrequency.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([keyword, frequency]) => ({ keyword, frequency }));
+
+      return {
+        avgScore,
+        avgComments,
+        peakHours,
+        topKeywords
+      };
+    } catch (error) {
+      console.error('Error analyzing subreddit engagement:', error);
+      return {
+        avgScore: 0,
+        avgComments: 0,
+        peakHours: [],
+        topKeywords: []
+      };
     }
   }
 }

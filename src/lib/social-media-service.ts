@@ -72,6 +72,16 @@ export interface Comment {
   replies?: Comment[];
 }
 
+interface SubredditActivityData {
+  activeUsers: number;
+  posts: Array<{
+    id: string;
+    created_utc: number;
+    score: number;
+    num_comments: number;
+  }>;
+}
+
 export class SocialMediaService {
   private redditService: RedditService;
   private supabase;
@@ -640,6 +650,46 @@ export class SocialMediaService {
       console.error('Error fetching comments:', error);
       return [];
     }
+  }
+
+  async getSubredditActivity(accountId: string, subreddit: string): Promise<SubredditActivityData> {
+    const account = await this.getAccount(accountId);
+    if (!account?.accessToken) {
+      throw new Error('Account not found or invalid access token');
+    }
+    return this.redditService.getSubredditActivity(account.accessToken, subreddit);
+  }
+
+  async analyzeBestPostingTime(accountId: string, subreddit: string): Promise<Array<{
+    dayOfWeek: string;
+    hourOfDay: number;
+    score: number;
+    activeUsers: number;
+  }>> {
+    const account = await this.getAccount(accountId);
+    if (!account?.accessToken) {
+      throw new Error('Account not found or invalid access token');
+    }
+    return this.redditService.analyzeBestPostingTime(account.accessToken, subreddit);
+  }
+
+  async analyzeSubredditEngagement(accountId: string, subreddit: string): Promise<{
+    avgScore: number;
+    avgComments: number;
+    peakHours: Array<{
+      hour: number;
+      engagement: number;
+    }>;
+    topKeywords: Array<{
+      keyword: string;
+      frequency: number;
+    }>;
+  }> {
+    const account = await this.getAccount(accountId);
+    if (!account?.accessToken) {
+      throw new Error('Account not found or invalid access token');
+    }
+    return this.redditService.analyzeSubredditEngagement(account.accessToken, subreddit);
   }
 
   private async recordPost(post: PostPlatformRecord) {

@@ -63,6 +63,15 @@ interface RedditPostConfig {
   flairId?: string;
 }
 
+export interface Comment {
+  id: string;
+  author: string;
+  content: string;
+  createdAt: number;
+  score: number;
+  replies?: Comment[];
+}
+
 export class SocialMediaService {
   private redditService: RedditService;
   private supabase;
@@ -605,6 +614,31 @@ export class SocialMediaService {
     } catch (error) {
       console.error('Error deleting post history:', error);
       throw new Error('Failed to delete post history');
+    }
+  }
+
+  async getPostComments(accountId: string, postId: string): Promise<Comment[]> {
+    try {
+      const account = await this.getAccount(accountId);
+      if (!account?.accessToken) {
+        throw new Error('Account not found or invalid access token');
+      }
+
+      const comments = await this.redditService.getPostComments(account.accessToken, postId);
+      
+      const convertComment = (redditComment: any): Comment => ({
+        id: redditComment.id,
+        author: redditComment.author,
+        content: redditComment.body,
+        createdAt: redditComment.created_utc,
+        score: redditComment.score,
+        replies: redditComment.replies?.map(convertComment)
+      });
+
+      return comments.map(convertComment);
+    } catch (error) {
+      console.error('Error fetching comments:', error);
+      return [];
     }
   }
 

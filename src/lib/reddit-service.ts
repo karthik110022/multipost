@@ -225,6 +225,15 @@ interface RedditPostStats {
   }>;
 }
 
+interface RedditComment {
+  id: string;
+  author: string;
+  body: string;
+  created_utc: number;
+  score: number;
+  replies?: RedditComment[];
+}
+
 export class RedditService {
   private readonly rateLimiter: RateLimiter;
   private clientId: string = '';
@@ -733,6 +742,53 @@ export class RedditService {
       }));
     } catch (error) {
       this.handleApiError(error);
+    }
+  }
+
+  async getPostComments(accessToken: string, postId: string): Promise<RedditComment[]> {
+    try {
+      const response = await this.makeApiRequest<any>(`/comments/${postId}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        accessToken,
+      });
+
+      // Reddit returns an array where the first element is the post and the second element contains comments
+      if (!Array.isArray(response) || response.length < 2) {
+        return [];
+      }
+
+      const parseComments = (commentData: any): RedditComment[] => {
+        if (!commentData?.data?.children) {
+          return [];
+        }
+
+        return commentData.data.children
+          .filter((child: any) => child.kind === 't1') // Filter only comments
+          .map((child: any) => {
+            const comment: RedditComment = {
+              id: child.data.id,
+              author: child.data.author,
+              body: child.data.body,
+              created_utc: child.data.created_utc,
+              score: child.data.score,
+            };
+
+            if (child.data.replies && child.data.replies.data) {
+              comment.replies = parseComments(child.data.replies);
+            }
+
+            return comment;
+          });
+      };
+
+      return parseComments(response[1]);
+    } catch (error) {
+      console.error('Error fetching comments:', error);
+      return [];
     }
   }
 }

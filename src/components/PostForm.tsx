@@ -5,7 +5,7 @@ import { User } from '@supabase/supabase-js';
 import { toast } from 'react-hot-toast';
 import { socialMediaService } from '@/lib/social-media-service';
 import type { SocialAccount } from '@/lib/social-media-service';
-import SubredditAnalytics from './SubredditAnalytics';
+import { useAnalytics } from './AnalyticsProvider';
 
 interface PostFormData {
   content: string;
@@ -31,6 +31,7 @@ interface PostResult {
 }
 
 export default function PostForm({ user }: Props) {
+  const { setSelectedSubreddit, setSelectedAccountId } = useAnalytics();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState(false);
@@ -108,24 +109,20 @@ export default function PostForm({ user }: Props) {
     }
   };
 
-  const handleSubredditChange = (accountId: string, subreddit: string) => {
-    setFormData(prev => {
-      const existingIndex = prev.subreddits.findIndex(s => s.accountId === accountId);
-      const newSubreddits = [...prev.subreddits];
-      
-      if (existingIndex >= 0) {
-        newSubreddits[existingIndex] = { accountId, subreddit };
-      } else {
-        newSubreddits.push({ accountId, subreddit });
-      }
+  const handleSubredditChange = async (accountId: string, subreddit: string) => {
+    setFormData(prev => ({
+      ...prev,
+      subreddits: [
+        ...prev.subreddits.filter(s => s.accountId !== accountId),
+        { accountId, subreddit }
+      ]
+    }));
 
-      return {
-        ...prev,
-        subreddits: newSubreddits
-      };
-    });
+    // Update analytics
+    setSelectedSubreddit(subreddit);
+    setSelectedAccountId(accountId);
 
-    // Load flairs for the selected subreddit
+    // Load flairs
     loadFlairsForSubreddit(accountId, subreddit);
   };
 
@@ -182,12 +179,7 @@ export default function PostForm({ user }: Props) {
 
       // Only reset form if all posts were successful
       if (enhancedResults.every((r: PostResult) => r.success)) {
-        setFormData({
-          content: '',
-          title: '',
-          selectedAccounts: [],
-          subreddits: []
-        });
+        resetForm();
         toast.success('All posts created successfully!');
       } else {
         // If some posts failed, show a warning
@@ -213,199 +205,202 @@ export default function PostForm({ user }: Props) {
     }
   };
 
+  const handleAccountSelection = (accountId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      selectedAccounts: prev.selectedAccounts.includes(accountId)
+        ? prev.selectedAccounts.filter(id => id !== accountId)
+        : [...prev.selectedAccounts, accountId]
+    }));
+  };
+
+  const resetForm = () => {
+    setFormData({
+      content: '',
+      title: '',
+      selectedAccounts: [],
+      subreddits: []
+    });
+    setSelectedSubreddit(null);
+    setSelectedAccountId(null);
+  };
+
   return (
-    <div className="max-w-4xl mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-6">Create Post</h1>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Select Accounts
+    <div className="max-w-4xl mx-auto">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Select Accounts
+          </label>
+          <div className="space-y-2">
+            {accounts.map(account => (
+              <label key={account.id} className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  checked={formData.selectedAccounts.includes(account.id)}
+                  onChange={(e) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      selectedAccounts: e.target.checked
+                        ? [...prev.selectedAccounts, account.id]
+                        : prev.selectedAccounts.filter(id => id !== account.id)
+                    }));
+                  }}
+                  className="rounded border-gray-300"
+                />
+                <span>{account.accountName} ({account.platform})</span>
               </label>
-              <div className="space-y-2">
-                {accounts.map(account => (
-                  <label key={account.id} className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      checked={formData.selectedAccounts.includes(account.id)}
-                      onChange={(e) => {
-                        setFormData(prev => ({
-                          ...prev,
-                          selectedAccounts: e.target.checked
-                            ? [...prev.selectedAccounts, account.id]
-                            : prev.selectedAccounts.filter(id => id !== account.id)
-                        }));
-                      }}
-                      className="rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700"
-                    />
-                    <span className="dark:text-gray-300">{account.accountName} ({account.platform})</span>
-                  </label>
-                ))}
-              </div>
+            ))}
+          </div>
+        </div>
+
+        {formData.selectedAccounts.some(id => 
+          accounts.find(acc => acc.id === id && acc.platform === 'reddit')
+        ) && (
+          <>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Title (Required for Reddit)
+              </label>
+              <input
+                type="text"
+                value={formData.title}
+                onChange={e => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                className="w-full p-2 border rounded bg-white text-gray-900 border-gray-300"
+                required
+              />
             </div>
 
-            {formData.selectedAccounts.some(id => 
-              accounts.find(acc => acc.id === id && acc.platform === 'reddit')
-            ) && (
-              <>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Title (Required for Reddit)
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.title}
-                    onChange={e => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                    className="w-full p-2 border rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600"
-                    required
-                  />
-                </div>
+            {formData.selectedAccounts.map(accountId => {
+              const account = accounts.find(acc => acc.id === accountId);
+              if (account?.platform !== 'reddit') return null;
 
-                {formData.selectedAccounts.map(accountId => {
-                  const account = accounts.find(acc => acc.id === accountId);
-                  if (account?.platform !== 'reddit') return null;
+              const subreddits = subredditsByAccount[accountId] || [];
+              const selectedSubreddit = formData.subreddits.find(s => s.accountId === accountId);
 
-                  const subreddits = subredditsByAccount[accountId] || [];
-                  const selectedSubreddit = formData.subreddits.find(s => s.accountId === accountId);
-
-                  return (
-                    <div key={accountId} className="mb-6 p-4 border rounded">
-                      <h3 className="font-medium mb-3">{account.accountName}</h3>
-                      
-                      <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Subreddit
-                        </label>
-                        <select
-                          value={selectedSubreddit?.subreddit || ''}
-                          onChange={e => handleSubredditChange(accountId, e.target.value)}
-                          className="w-full p-2 border rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600"
-                          required
-                        >
-                          <option value="">Select a subreddit</option>
-                          {loadingSubreddits[accountId] ? (
-                            <option value="" disabled>Loading subreddits...</option>
-                          ) : (
-                            subreddits.map(subreddit => (
-                              <option key={subreddit.name} value={subreddit.name}>
-                                {subreddit.displayName || subreddit.name}
-                              </option>
-                            ))
-                          )}
-                        </select>
-                      </div>
-
-                      {selectedSubreddit?.subreddit && (
-                        <div className="mb-4">
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Post Flair
-                          </label>
-                          <select
-                            value={selectedSubreddit.flairId || ''}
-                            onChange={e => handleFlairChange(accountId, e.target.value)}
-                            className="w-full p-2 border rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600"
-                          >
-                            <option value="">No flair</option>
-                            {loadingFlairs[`${accountId}-${selectedSubreddit.subreddit}`] ? (
-                              <option value="" disabled>Loading flairs...</option>
-                            ) : (
-                              (flairsBySubreddit[`${accountId}-${selectedSubreddit.subreddit}`] || []).map(flair => (
-                                <option key={flair.id} value={flair.id}>
-                                  {flair.text}
-                                </option>
-                              ))
-                            )}
-                          </select>
-                        </div>
+              return (
+                <div key={accountId} className="mb-6 p-4 border rounded">
+                  <h3 className="font-medium mb-3">{account.accountName}</h3>
+                  
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Subreddit
+                    </label>
+                    <select
+                      value={selectedSubreddit?.subreddit || ''}
+                      onChange={e => handleSubredditChange(accountId, e.target.value)}
+                      className="w-full p-2 border rounded bg-white text-gray-900 border-gray-300"
+                      required
+                    >
+                      <option value="">Select a subreddit</option>
+                      {loadingSubreddits[accountId] ? (
+                        <option value="" disabled>Loading subreddits...</option>
+                      ) : (
+                        subreddits.map(subreddit => (
+                          <option key={subreddit.name} value={subreddit.name}>
+                            {subreddit.displayName || subreddit.name}
+                          </option>
+                        ))
                       )}
-                    </div>
-                  );
-                })}
+                    </select>
+                  </div>
 
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Content
-                  </label>
-                  <textarea
-                    value={formData.content}
-                    onChange={e => setFormData(prev => ({ ...prev, content: e.target.value }))}
-                    className="w-full p-2 border rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-600"
-                    rows={4}
-                    required
-                  />
-                </div>
-              </>
-            )}
-
-            {showResults && postResults.length > 0 && (
-              <div className="mt-6 space-y-4">
-                <h3 className="text-lg font-medium">Post Results:</h3>
-                <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                  {postResults.map((result, index) => {
-                    const account = accounts.find(acc => acc.id === result.accountId);
-                    return (
-                      <div key={index} className="py-4">
-                        <div className="flex items-center space-x-2">
-                          <div className={`w-2 h-2 rounded-full ${result.success ? 'bg-green-500' : 'bg-red-500'}`} />
-                          <span className="font-medium">
-                            {account?.accountName} ({account?.platform})
-                          </span>
-                          <span className="text-gray-500">→</span>
-                          <span className="text-gray-700 dark:text-gray-300">
-                            r/{result.subreddit}
-                          </span>
-                        </div>
-                        {result.success ? (
-                          <p className="mt-1 text-sm text-green-600 dark:text-green-400">
-                            Post created successfully
-                          </p>
+                  {selectedSubreddit?.subreddit && (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Post Flair
+                      </label>
+                      <select
+                        value={selectedSubreddit.flairId || ''}
+                        onChange={e => handleFlairChange(accountId, e.target.value)}
+                        className="w-full p-2 border rounded bg-white text-gray-900 border-gray-300"
+                      >
+                        <option value="">No flair</option>
+                        {loadingFlairs[`${accountId}-${selectedSubreddit.subreddit}`] ? (
+                          <option value="" disabled>Loading flairs...</option>
                         ) : (
-                          <p className="mt-1 text-sm text-red-600 dark:text-red-400">
-                            {result.error === 'INSUFFICIENT_KARMA' 
-                              ? `Not enough karma to post in r/${result.subreddit}`
-                              : result.error || 'Failed to create post'}
-                          </p>
+                          (flairsBySubreddit[`${accountId}-${selectedSubreddit.subreddit}`] || []).map(flair => (
+                            <option key={flair.id} value={flair.id}>
+                              {flair.text}
+                            </option>
+                          ))
                         )}
-                      </div>
-                    );
-                  })}
+                      </select>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })}
 
-            {error && (
-              <div className="text-red-500 dark:text-red-400 mb-4">
-                {error}
-              </div>
-            )}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Content
+              </label>
+              <textarea
+                value={formData.content}
+                onChange={e => setFormData(prev => ({ ...prev, content: e.target.value }))}
+                className="w-full p-2 border rounded bg-white text-gray-900 border-gray-300"
+                rows={4}
+                required
+              />
+            </div>
+          </>
+        )}
 
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className={`w-full py-2 px-4 rounded ${
-                isSubmitting
-                  ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed'
-                  : 'bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700'
-              } text-white`}
-            >
-              {isSubmitting ? 'Creating Posts...' : 'Create Posts'}
-            </button>
-          </form>
-        </div>
+        {showResults && postResults.length > 0 && (
+          <div className="mt-6 space-y-4">
+            <h3 className="text-lg font-medium">Post Results:</h3>
+            <div className="divide-y divide-gray-200">
+              {postResults.map((result, index) => {
+                const account = accounts.find(acc => acc.id === result.accountId);
+                return (
+                  <div key={index} className="py-4">
+                    <div className="flex items-center space-x-2">
+                      <div className={`w-2 h-2 rounded-full ${result.success ? 'bg-green-500' : 'bg-red-500'}`} />
+                      <span className="font-medium">
+                        {account?.accountName} ({account?.platform})
+                      </span>
+                      <span className="text-gray-500">→</span>
+                      <span className="text-gray-700">
+                        r/{result.subreddit}
+                      </span>
+                    </div>
+                    {result.success ? (
+                      <p className="mt-1 text-sm text-green-600">
+                        Post created successfully
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-sm text-red-600">
+                        {result.error === 'INSUFFICIENT_KARMA' 
+                          ? `Not enough karma to post in r/${result.subreddit}`
+                          : result.error || 'Failed to create post'}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
-        <div className="space-y-6">
-          {formData.subreddits.map((subredditData) => (
-            <SubredditAnalytics
-              key={`${subredditData.accountId}-${subredditData.subreddit}`}
-              subreddit={subredditData.subreddit}
-              accountId={subredditData.accountId}
-            />
-          ))}
-        </div>
-      </div>
+        {error && (
+          <div className="text-red-500 mb-4">
+            {error}
+          </div>
+        )}
 
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className={`w-full py-2 px-4 rounded ${
+            isSubmitting
+              ? 'bg-gray-400 cursor-not-allowed'
+              : 'bg-blue-500 hover:bg-blue-600'
+          } text-white`}
+        >
+          {isSubmitting ? 'Creating Posts...' : 'Create Posts'}
+        </button>
+      </form>
     </div>
   );
 }

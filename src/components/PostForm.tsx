@@ -16,10 +16,13 @@ interface PostFormData {
     subreddit: string;
     flairId?: string;
   }>;
+  scheduledFor?: string;
 }
 
 interface Props {
   user: User | null;
+  isScheduled?: boolean;
+  onPostCreated?: () => void;
 }
 
 interface PostResult {
@@ -30,7 +33,7 @@ interface PostResult {
   subreddit?: string;
 }
 
-export default function PostForm({ user }: Props) {
+export default function PostForm({ user, isScheduled = false, onPostCreated }: Props) {
   const { setSelectedSubreddit, setSelectedAccountId } = useAnalytics();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
@@ -145,7 +148,8 @@ export default function PostForm({ user }: Props) {
     setPostResults([]);
 
     try {
-      const response = await fetch('/api/social/create-post', {
+      const endpoint = isScheduled ? '/api/social/schedule-post' : '/api/social/create-post';
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -157,7 +161,8 @@ export default function PostForm({ user }: Props) {
             accountId: sub.accountId,
             subreddit: sub.subreddit,
             flairId: sub.flairId
-          }))
+          })),
+          scheduledFor: formData.scheduledFor
         }),
       });
 
@@ -180,7 +185,8 @@ export default function PostForm({ user }: Props) {
       // Only reset form if all posts were successful
       if (enhancedResults.every((r: PostResult) => r.success)) {
         resetForm();
-        toast.success('All posts created successfully!');
+        toast.success(isScheduled ? 'Posts scheduled successfully!' : 'All posts created successfully!');
+        onPostCreated?.();
       } else {
         // If some posts failed, show a warning
         toast.error('Some posts failed. Check the results below.');
@@ -219,7 +225,8 @@ export default function PostForm({ user }: Props) {
       content: '',
       title: '',
       selectedAccounts: [],
-      subreddits: []
+      subreddits: [],
+      scheduledFor: undefined
     });
     setSelectedSubreddit(null);
     setSelectedAccountId(null);
@@ -253,6 +260,26 @@ export default function PostForm({ user }: Props) {
             ))}
           </div>
         </div>
+
+        {isScheduled && (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Schedule For
+            </label>
+            <input
+              type="datetime-local"
+              value={formData.scheduledFor ? new Date(formData.scheduledFor).toLocaleString('sv-SE').slice(0, 16) : ''}
+              onChange={e => {
+                // Create date in local timezone
+                const date = new Date(e.target.value);
+                setFormData(prev => ({ ...prev, scheduledFor: date.toISOString() }));
+              }}
+              className="w-full p-2 border rounded bg-white text-gray-900 border-gray-300"
+              required
+              min={new Date().toISOString().slice(0, 16)}
+            />
+          </div>
+        )}
 
         {formData.selectedAccounts.some(id => 
           accounts.find(acc => acc.id === id && acc.platform === 'reddit')
@@ -398,7 +425,7 @@ export default function PostForm({ user }: Props) {
               : 'bg-blue-500 hover:bg-blue-600'
           } text-white`}
         >
-          {isSubmitting ? 'Creating Posts...' : 'Create Posts'}
+          {isSubmitting ? 'Creating Posts...' : isScheduled ? 'Schedule Posts' : 'Create Posts'}
         </button>
       </form>
     </div>

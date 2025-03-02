@@ -4,5 +4,9 @@
   "devCommand": "next dev",
   "installCommand": "npm install",
   "framework": "nextjs",
-  "outputDirectory": ".next"
+  "outputDirectory": ".next",
+  "crons": [{
+    "path": "/api/cron/publish-scheduled?secret=@cron-secret",
+    "schedule": "* * * * *"
+  }]
 }

@@ -1,4 +1,5 @@
 import { createBrowserClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 import { RedditService } from './reddit-service';
 
 export interface SocialAccount {
@@ -86,12 +87,24 @@ export class SocialMediaService {
   private redditService: RedditService;
   private supabase;
 
-  constructor(supabase?: any) {
+  constructor(supabase?: any, useServiceRole: boolean = false) {
     this.redditService = new RedditService();
-    this.supabase = supabase || createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
+    if (useServiceRole) {
+      this.supabase = supabase || createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        {
+          auth: {
+            persistSession: false
+          }
+        }
+      );
+    } else {
+      this.supabase = supabase || createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      );
+    }
   }
 
   getRedditAuthUrl(): string {
@@ -294,15 +307,20 @@ export class SocialMediaService {
   async createPost(
     title: string,
     content: string,
-    posts: RedditPostConfig[]
+    posts: RedditPostConfig[],
+    userId?: string
   ): Promise<PostResult[]> {
     const results: PostResult[] = [];
 
     try {
-      // Get the current user
-      const { data: { user }, error: userError } = await this.supabase.auth.getUser();
-      if (userError) throw userError;
-      if (!user) throw new Error('User not authenticated');
+      // Get the user ID from parameter or auth
+      let actualUserId = userId;
+      if (!actualUserId) {
+        const { data: { user }, error: userError } = await this.supabase.auth.getUser();
+        if (userError) throw userError;
+        if (!user) throw new Error('User not authenticated');
+        actualUserId = user.id;
+      }
 
       // Create the main post record
       const { data: postRecord, error: postError } = await this.supabase
@@ -310,7 +328,7 @@ export class SocialMediaService {
         .insert({
           title,
           content,
-          user_id: user.id,
+          user_id: actualUserId,
           created_at: new Date().toISOString()
         })
         .select()

@@ -2,7 +2,6 @@
 
 import { useAuth } from '@/context/AuthContext';
 import ConnectAccounts from '@/components/ConnectAccounts';
-import Sidebar from '@/components/Sidebar';
 
 export default function AccountsPage() {
   const { user } = useAuth();
@@ -12,11 +11,9 @@ export default function AccountsPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar />
-      <main className="flex-1 p-8">
-        <ConnectAccounts />
-      </main>
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-2xl font-bold mb-8">Connected Accounts</h1>
+      <ConnectAccounts />
     </div>
   );
 }

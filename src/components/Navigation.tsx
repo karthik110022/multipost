@@ -39,6 +39,9 @@ export default function Navigation() {
               <Link href="/history" className={linkClass('/history')}>
                 Post History
               </Link>
+              <Link href="/scheduled" className={linkClass('/scheduled')}>
+                Scheduled Posts
+              </Link>
               <Link href="/accounts" className={linkClass('/accounts')}>
                 Connected Accounts
               </Link>

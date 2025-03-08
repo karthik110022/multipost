@@ -7,8 +7,8 @@
   "outputDirectory": ".next",
   "crons": [
     {
-      "path": "/api/cron/publish-scheduled?secret=nUe9kvucJ0TvQbK1HrgQ5TFNMvOoZLr0KNNRScI%2BLQM=",
-      "schedule": "* * * * *"
+      "path": "/api/scheduler/process?secret=nUe9kvucJ0TvQbK1HrgQ5TFNMvOoZLr0KNNRScI%2BLQM=",
+      "schedule": "*/2 * * * *"
     }
   ],
   "env": {

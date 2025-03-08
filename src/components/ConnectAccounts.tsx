@@ -3,11 +3,11 @@
 import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { useAuth } from '@/context/AuthContext';
-import { socialMediaService } from '@/lib/social-media-service';
+import { SocialMediaService } from '@/lib/social-media-service';
 import type { SocialAccount } from '@/lib/social-media-service';
 import RedditConnectModal from './RedditConnectModal';
 import { useSearchParams, usePathname, useRouter } from 'next/navigation';
-import toast from 'react-hot-toast'; // Assuming you have react-hot-toast installed
+import toast from 'react-hot-toast';
 
 export default function ConnectAccounts() {
   const { user } = useAuth();
@@ -18,6 +18,7 @@ export default function ConnectAccounts() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
+  const socialMediaService = new SocialMediaService();
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -46,21 +47,62 @@ export default function ConnectAccounts() {
 
   const handleRedditConnect = () => {
     setError(null);
-    // Store current timestamp to detect if we're returning from Reddit
     localStorage.setItem('lastRedditConnect', Date.now().toString());
     const authUrl = socialMediaService.getRedditAuthUrl();
-    // Open Reddit auth in a new window
     window.open(authUrl, '_blank', 'width=600,height=800');
   };
 
   const handleDisconnect = async (accountId: string) => {
+    if (!window.confirm('Are you sure you want to disconnect this account? Your post history and published posts will be preserved.')) {
+      return;
+    }
+
     try {
+      setLoading(true);
       setError(null);
-      await socialMediaService.disconnectAccount(accountId);
+
+      // 1. First update posts to remove the social_account_id reference
+      const { error: postsError } = await supabase
+        .from('posts')
+        .update({ social_account_id: null })
+        .eq('social_account_id', accountId);
+
+      if (postsError) {
+        throw postsError;
+      }
+
+      // 2. Update only non-published post_platforms to 'disconnected'
+      const { error: platformsError } = await supabase
+        .from('post_platforms')
+        .update({ 
+          status: 'disconnected',
+          error_message: 'Account was disconnected'
+        })
+        .eq('social_account_id', accountId)
+        .neq('status', 'published'); // Don't change status of published posts
+
+      if (platformsError) {
+        throw platformsError;
+      }
+
+      // 3. Finally delete the social account
+      const { error: accountError } = await supabase
+        .from('social_accounts')
+        .delete()
+        .eq('id', accountId);
+
+      if (accountError) {
+        throw accountError;
+      }
+
       await loadAccounts();
-    } catch (error) {
+      toast.success('Account disconnected successfully. Published posts have been preserved.');
+    } catch (error: any) {
       console.error('Error disconnecting account:', error);
-      setError('Failed to disconnect account');
+      setError(error?.message || 'Failed to disconnect account');
+      toast.error(error?.message || 'Failed to disconnect account');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -68,7 +110,7 @@ export default function ConnectAccounts() {
     try {
       setError(null);
       await socialMediaService.setActiveAccount(accountId);
-      await loadAccounts(); // Reload to update UI
+      await loadAccounts();
       toast.success('Active account updated successfully');
     } catch (error) {
       console.error('Error setting active account:', error);
@@ -114,20 +156,6 @@ export default function ConnectAccounts() {
           </div>
 
           <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold">Connected Accounts</h2>
-              <button
-                onClick={handleRedditConnect}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm"
-              >
-                Connect New Account
-              </button>
-            </div>
-            {error && (
-              <div className="bg-red-50 text-red-600 p-4 rounded-md">
-                {error}
-              </div>
-            )}
             <div className="bg-yellow-50 text-yellow-800 p-4 rounded-md mb-4">
               <p className="font-medium">To connect a different Reddit account:</p>
               <ol className="list-decimal list-inside mt-2 space-y-1">

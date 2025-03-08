@@ -5,8 +5,13 @@
   "installCommand": "npm install",
   "framework": "nextjs",
   "outputDirectory": ".next",
-  "crons": [{
-    "path": "/api/cron/publish-scheduled?secret=@cron-secret",
-    "schedule": "* * * * *"
-  }]
+  "crons": [
+    {
+      "path": "/api/cron/publish-scheduled?secret=nUe9kvucJ0TvQbK1HrgQ5TFNMvOoZLr0KNNRScI%2BLQM=",
+      "schedule": "* * * * *"
+    }
+  ],
+  "env": {
+    "CRON_SECRET": "nUe9kvucJ0TvQbK1HrgQ5TFNMvOoZLr0KNNRScI%2BLQM="
+  }
 }

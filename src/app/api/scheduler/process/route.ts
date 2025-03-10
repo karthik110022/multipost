@@ -102,6 +102,20 @@ export async function POST(request: Request) {
       }
     );
 
+    // First, update any pending posts to scheduled
+    const { data: pendingPosts, error: pendingError } = await supabase
+      .from('posts')
+      .update({ status: 'scheduled' })
+      .eq('status', 'pending')
+      .not('scheduled_for', 'is', null)
+      .select();
+
+    if (pendingError) {
+      console.error('Error updating pending posts:', pendingError);
+    } else if (pendingPosts && pendingPosts.length > 0) {
+      console.log(`Updated ${pendingPosts.length} pending posts to scheduled`);
+    }
+
     // Get all due posts
     const currentTime = new Date().toISOString();
     const { data: duePosts, error } = await supabase

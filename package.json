@@ -13,6 +13,7 @@
     "dev:scheduler": "node scripts/dev-scheduler.js"
   },
   "dependencies": {
+    "@netlify/functions": "^3.0.1",
     "@radix-ui/react-slot": "^1.1.2",
     "@supabase/auth-helpers-nextjs": "^0.10.0",
     "@supabase/ssr": "^0.1.0",
@@ -44,11 +45,11 @@
     "eslint": "8.56.0",
     "eslint-config-next": "14.1.0",
     "jsdom": "^26.0.0",
+    "node-cron": "^3.0.0",
+    "node-fetch": "^2.6.7",
     "postcss": "^8.4.33",
     "tailwindcss": "^3.4.1",
     "typescript": "5.3.3",
-    "vitest": "^3.0.5",
-    "node-cron": "^3.0.0",
-    "node-fetch": "^2.6.7"
+    "vitest": "^3.0.5"
   }
 }

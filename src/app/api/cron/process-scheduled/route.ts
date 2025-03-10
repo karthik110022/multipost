@@ -122,9 +122,33 @@ export async function POST(request: Request) {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
       {
-        auth: { persistSession: false }
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        },
+        db: {
+          schema: 'public'
+        },
+        global: {
+          headers: {
+            Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+          }
+        }
       }
     );
+
+    // Verify service role connection
+    const { data: testConnection, error: testError } = await supabase
+      .from('posts')
+      .select('count')
+      .limit(1)
+      .single();
+
+    if (testError) {
+      console.error('Service role connection test failed:', testError);
+      throw new Error('Failed to connect with service role: ' + testError.message);
+    }
 
     // First, update any pending posts to scheduled
     const { data: pendingPosts, error: pendingError } = await supabase

@@ -95,7 +95,17 @@ export class SocialMediaService {
         process.env.SUPABASE_SERVICE_ROLE_KEY!,
         {
           auth: {
-            persistSession: false
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false
+          },
+          db: {
+            schema: 'public'
+          },
+          global: {
+            headers: {
+              Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+            }
           }
         }
       );

@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
-import { socialMediaService } from '@/lib/social-media-service';
+import { SocialMediaService } from '@/lib/social-media-service';
 
 // Allowed IPs from cron-job.org
 const ALLOWED_IPS = [
@@ -11,18 +11,33 @@ const ALLOWED_IPS = [
 ];
 
 async function processBatch(supabase: any, posts: any[], batchSize: number = 5) {
+  // Initialize social media service with service role
+  const socialMediaService = new SocialMediaService(supabase, true);
+
   for (let i = 0; i < posts.length; i += batchSize) {
     const batch = posts.slice(i, i + batchSize);
     console.log(`Processing batch ${i / batchSize + 1} of ${Math.ceil(posts.length / batchSize)}`);
     
     await Promise.all(batch.map(async (post) => {
       try {
+        console.log('Processing post:', {
+          id: post.id,
+          title: post.title,
+          accountId: post.social_account_id,
+          subreddit: post.subreddit
+        });
+
         // Get the social account with access token
-        const { data: account } = await supabase
+        const { data: account, error: accountError } = await supabase
           .from('social_accounts')
           .select('*')
           .eq('id', post.social_account_id)
           .single();
+
+        if (accountError) {
+          console.error('Error fetching account:', accountError);
+          throw new Error('Failed to fetch social account: ' + accountError.message);
+        }
 
         if (!account?.access_token) {
           throw new Error('Access token not found for account');
@@ -40,12 +55,14 @@ async function processBatch(supabase: any, posts: any[], batchSize: number = 5) 
           post.user_id
         );
 
+        console.log('Post creation result:', result);
+
         if (!result[0]?.success) {
           throw new Error(result[0]?.error || 'Failed to create post');
         }
 
         // Update post status
-        await supabase
+        const { error: updateError } = await supabase
           .from('posts')
           .update({
             status: 'published',
@@ -54,6 +71,11 @@ async function processBatch(supabase: any, posts: any[], batchSize: number = 5) 
             updated_at: new Date().toISOString()
           })
           .eq('id', post.id);
+
+        if (updateError) {
+          console.error('Error updating post status:', updateError);
+          throw new Error('Failed to update post status: ' + updateError.message);
+        }
 
         return { postId: post.id, success: true };
       } catch (error: any) {
@@ -72,7 +94,7 @@ async function processBatch(supabase: any, posts: any[], batchSize: number = 5) 
         }
         
         // Update post status with specific error
-        await supabase
+        const { error: updateError } = await supabase
           .from('posts')
           .update({
             status: errorStatus,
@@ -81,6 +103,10 @@ async function processBatch(supabase: any, posts: any[], batchSize: number = 5) 
             published_at: null
           })
           .eq('id', post.id);
+
+        if (updateError) {
+          console.error('Error updating error status:', updateError);
+        }
 
         return { postId: post.id, success: false, error: errorMessage, status: errorStatus };
       }

@@ -46,7 +46,8 @@ async function processBatch(supabase: any, posts: any[], batchSize: number = 5) 
           .update({
             status: result[0]?.success ? 'published' : 'failed',
             published_at: result[0]?.success ? new Date().toISOString() : null,
-            error_message: result[0]?.error || null
+            error_message: result[0]?.error || null,
+            updated_at: new Date().toISOString()
           })
           .eq('id', post.id);
 
@@ -54,16 +55,29 @@ async function processBatch(supabase: any, posts: any[], batchSize: number = 5) 
       } catch (error: any) {
         console.error(`Error processing post ${post.id}:`, error);
         
-        // Update post status to failed
+        let errorStatus = 'failed';
+        let errorMessage = error.message;
+
+        // Determine specific error status
+        if (error.message.includes('karma')) {
+          errorStatus = 'karma_insufficient';
+        } else if (error.message.includes('rate limit')) {
+          errorStatus = 'rate_limited';
+        } else if (error.message.includes('subreddit')) {
+          errorStatus = 'invalid_subreddit';
+        }
+        
+        // Update post status with specific error
         await supabase
           .from('posts')
           .update({
-            status: 'failed',
-            error_message: error.message
+            status: errorStatus,
+            error_message: errorMessage,
+            updated_at: new Date().toISOString()
           })
           .eq('id', post.id);
 
-        return { postId: post.id, success: false, error: error.message };
+        return { postId: post.id, success: false, error: errorMessage, status: errorStatus };
       }
     }));
 
@@ -107,6 +121,23 @@ export async function POST(request: Request) {
       }
     );
 
+    // First, update any pending posts to scheduled
+    const { data: pendingPosts, error: pendingError } = await supabase
+      .from('posts')
+      .update({ 
+        status: 'scheduled',
+        updated_at: new Date().toISOString()
+      })
+      .eq('status', 'pending')
+      .not('scheduled_for', 'is', null)
+      .select();
+
+    if (pendingError) {
+      console.error('Error updating pending posts:', pendingError);
+    } else if (pendingPosts && pendingPosts.length > 0) {
+      console.log(`Updated ${pendingPosts.length} pending posts to scheduled`);
+    }
+
     // Get all due posts
     const currentTime = new Date().toISOString();
     const { data: duePosts, error } = await supabase
@@ -136,7 +167,10 @@ export async function POST(request: Request) {
   } catch (error: any) {
     console.error('Error in scheduled post processing:', error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { 
+        error: error.message || 'Internal server error',
+        timestamp: new Date().toISOString()
+      },
       { status: 500 }
     );
   }

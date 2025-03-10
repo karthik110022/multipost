@@ -40,13 +40,17 @@ async function processBatch(supabase: any, posts: any[], batchSize: number = 5) 
           post.user_id
         );
 
+        if (!result[0]?.success) {
+          throw new Error(result[0]?.error || 'Failed to create post');
+        }
+
         // Update post status
         await supabase
           .from('posts')
           .update({
-            status: result[0]?.success ? 'published' : 'failed',
-            published_at: result[0]?.success ? new Date().toISOString() : null,
-            error_message: result[0]?.error || null,
+            status: 'published',
+            published_at: new Date().toISOString(),
+            error_message: null,
             updated_at: new Date().toISOString()
           })
           .eq('id', post.id);
@@ -59,11 +63,11 @@ async function processBatch(supabase: any, posts: any[], batchSize: number = 5) 
         let errorMessage = error.message;
 
         // Determine specific error status
-        if (error.message.includes('karma')) {
+        if (error.message?.toLowerCase().includes('karma')) {
           errorStatus = 'karma_insufficient';
-        } else if (error.message.includes('rate limit')) {
+        } else if (error.message?.toLowerCase().includes('rate limit')) {
           errorStatus = 'rate_limited';
-        } else if (error.message.includes('subreddit')) {
+        } else if (error.message?.toLowerCase().includes('subreddit')) {
           errorStatus = 'invalid_subreddit';
         }
         
@@ -73,7 +77,8 @@ async function processBatch(supabase: any, posts: any[], batchSize: number = 5) 
           .update({
             status: errorStatus,
             error_message: errorMessage,
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
+            published_at: null
           })
           .eq('id', post.id);
 

@@ -128,6 +128,7 @@ export class SocialMediaService {
 
   async getConnectedAccounts(): Promise<SocialAccount[]> {
     try {
+      console.log('Fetching connected accounts...');
       const { data: accounts, error } = await this.supabase
         .from('social_accounts')
         .select('*')
@@ -139,11 +140,15 @@ export class SocialMediaService {
       }
 
       if (!accounts) {
+        console.log('No accounts found');
         return [];
       }
 
+      console.log('Found accounts:', accounts.length);
+
       // Get the active account ID from local storage
       const activeAccountId = localStorage.getItem('activeAccountId');
+      console.log('Active account ID from localStorage:', activeAccountId);
 
       const transformedAccounts = accounts.map((account: {
         id: string;
@@ -160,13 +165,14 @@ export class SocialMediaService {
 
       // If no active account is set and we have accounts, set the first one as active
       if (!activeAccountId && transformedAccounts.length > 0) {
+        console.log('Setting first account as active:', transformedAccounts[0].id);
         localStorage.setItem('activeAccountId', transformedAccounts[0].id);
         transformedAccounts[0].isActive = true;
       }
 
       return transformedAccounts;
     } catch (error) {
-      console.error('Error fetching accounts:', error);
+      console.error('Error in getConnectedAccounts:', error);
       return [];
     }
   }
@@ -533,13 +539,20 @@ export class SocialMediaService {
     code: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
+      console.log('Handling Reddit callback for user:', userId);
+      
       // Exchange code for tokens
+      console.log('Exchanging code for tokens...');
       const tokens = await this.redditService.exchangeCode(code);
+      console.log('Token exchange successful');
 
       // Get user info from Reddit
+      console.log('Getting Reddit user info...');
       const userInfo = await this.redditService.getUserInfo(tokens.access_token);
+      console.log('Got Reddit user info:', { username: userInfo.name });
 
       // Check if this Reddit account is already connected
+      console.log('Checking for existing connection...');
       const { data: existingAccount } = await this.supabase
         .from('social_accounts')
         .select('*')
@@ -548,12 +561,14 @@ export class SocialMediaService {
         .maybeSingle();
 
       if (existingAccount) {
+        console.log('Account already connected:', existingAccount);
         return {
           success: false,
           error: `Reddit account u/${userInfo.name} is already connected`,
         };
       }
 
+      console.log('Creating new social account record...');
       // Insert new account
       const { error: insertError } = await this.supabase
         .from('social_accounts')
@@ -568,8 +583,12 @@ export class SocialMediaService {
           created_at: new Date().toISOString()
         });
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error('Error inserting social account:', insertError);
+        throw insertError;
+      }
 
+      console.log('Reddit account connected successfully');
       return { success: true };
     } catch (error) {
       console.error('Error in Reddit callback:', error);

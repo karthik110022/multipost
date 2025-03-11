@@ -46,9 +46,11 @@ export default function ConnectAccounts() {
   };
 
   const handleRedditConnect = () => {
+    console.log('Initiating Reddit connection...');
     setError(null);
     localStorage.setItem('lastRedditConnect', Date.now().toString());
     const authUrl = socialMediaService.getRedditAuthUrl();
+    console.log('Generated Reddit auth URL:', authUrl);
     window.open(authUrl, '_blank', 'width=600,height=800');
   };
 

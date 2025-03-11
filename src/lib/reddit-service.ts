@@ -270,29 +270,50 @@ export class RedditService {
 
   private validateCredentials() {
     try {
+      console.log('Validating Reddit credentials...');
       validateEnv();
 
       const clientId = env.NEXT_PUBLIC_REDDIT_CLIENT_ID;
       const clientSecret = env.REDDIT_CLIENT_SECRET;
       const appUrl = env.NEXT_PUBLIC_APP_URL;
 
+      console.log('Environment validation:', {
+        clientIdPresent: !!clientId,
+        clientIdValid: clientId.length > 0,
+        clientSecretPresent: !!clientSecret,
+        clientSecretValid: clientSecret.length > 0,
+        appUrl
+      });
+
       if (!clientId || !clientSecret) {
+        const missingVars = [];
+        if (!clientId) missingVars.push('NEXT_PUBLIC_REDDIT_CLIENT_ID');
+        if (!clientSecret) missingVars.push('REDDIT_CLIENT_SECRET');
+        
         console.error('Missing Reddit credentials:', {
+          missingVars,
           hasClientId: !!clientId,
           hasClientSecret: !!clientSecret,
         });
-        throw new Error('Reddit credentials are not properly configured. Please check your environment variables.');
+        throw new Error(`Reddit credentials are not properly configured. Missing: ${missingVars.join(', ')}`);
+      }
+
+      if (!appUrl) {
+        console.error('Missing APP_URL configuration');
+        throw new Error('APP_URL is not properly configured');
       }
 
       this.clientId = clientId;
       this.clientSecret = clientSecret;
       this.redirectUri = `${appUrl}/auth/callback/reddit`;
 
-      // Log the configuration
+      // Log the configuration (safely)
       console.log('Reddit Configuration:', {
         hasClientId: !!this.clientId,
+        clientIdLength: this.clientId.length,
         redirectUri: this.redirectUri,
         hasSecret: !!this.clientSecret,
+        secretLength: this.clientSecret.length,
         appUrl
       });
     } catch (error) {
@@ -662,21 +683,44 @@ export class RedditService {
   }
 
   getAuthUrl(): string {
-    this.validateCredentials();
-    const params = {
-      client_id: this.clientId,
-      response_type: 'code',
-      state: 'random_state',
-      redirect_uri: `${env.NEXT_PUBLIC_APP_URL}/auth/callback/reddit`,
-      duration: 'permanent',
-      scope: 'identity submit read subscribe mysubreddits flair',
-      prompt: 'consent'
-    };
+    try {
+      console.log('Starting Reddit auth URL generation...');
+      this.validateCredentials();
+      
+      // Log environment variables (safely)
+      console.log('Environment check:', {
+        hasClientId: !!this.clientId,
+        clientIdLength: this.clientId.length,
+        hasClientSecret: !!this.clientSecret,
+        appUrl: env.NEXT_PUBLIC_APP_URL
+      });
 
-    // Log the redirect URI for debugging
-    console.log('Redirect URI:', params.redirect_uri);
+      const redirectUri = `${env.NEXT_PUBLIC_APP_URL}/auth/callback/reddit`;
+      console.log('Redirect URI:', redirectUri);
 
-    return `https://www.reddit.com/api/v1/authorize?${new URLSearchParams(params).toString()}`;
+      const params = {
+        client_id: this.clientId,
+        response_type: 'code',
+        state: 'random_state',
+        redirect_uri: redirectUri,
+        duration: 'permanent',
+        scope: 'identity submit read subscribe mysubreddits flair',
+        prompt: 'consent'
+      };
+
+      console.log('Auth parameters:', {
+        ...params,
+        client_id: params.client_id.substring(0, 4) + '...' // Only show first 4 chars for security
+      });
+
+      const authUrl = `https://www.reddit.com/api/v1/authorize?${new URLSearchParams(params).toString()}`;
+      console.log('Generated auth URL:', authUrl);
+
+      return authUrl;
+    } catch (error) {
+      console.error('Error generating Reddit auth URL:', error);
+      throw error;
+    }
   }
 
   async getUserInfo(accessToken: string): Promise<{ name: string; id: string }> {

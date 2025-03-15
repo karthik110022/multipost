@@ -637,13 +637,32 @@ export class RedditService {
 
   async exchangeCode(code: string): Promise<RedditTokens> {
     console.log('Exchanging code for tokens...');
-    const params = new URLSearchParams();
-    params.append('grant_type', 'authorization_code');
-    params.append('code', code);
-    params.append('redirect_uri', `${env.NEXT_PUBLIC_APP_URL}/auth/callback/reddit`);
-
+    
     try {
-      console.log('Making token request to Reddit...');
+      // Validate environment variables first
+      this.validateCredentials();
+      
+      // Log the configuration being used
+      console.log('Exchange configuration:', {
+        clientIdPresent: !!this.clientId,
+        clientIdLength: this.clientId.length,
+        clientSecretPresent: !!this.clientSecret,
+        clientSecretLength: this.clientSecret.length,
+        appUrl: env.NEXT_PUBLIC_APP_URL,
+        redirectUri: `${env.NEXT_PUBLIC_APP_URL}/auth/callback/reddit`
+      });
+
+      const params = new URLSearchParams();
+      params.append('grant_type', 'authorization_code');
+      params.append('code', code);
+      params.append('redirect_uri', `${env.NEXT_PUBLIC_APP_URL}/auth/callback/reddit`);
+
+      console.log('Making token request to Reddit with params:', {
+        grantType: params.get('grant_type'),
+        hasCode: !!params.get('code'),
+        redirectUri: params.get('redirect_uri')
+      });
+
       const response = await fetch('https://www.reddit.com/api/v1/access_token', {
         method: 'POST',
         headers: {
@@ -653,31 +672,54 @@ export class RedditService {
         body: params.toString()
       });
 
+      const responseText = await response.text();
+      console.log('Raw response from Reddit:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
+        body: responseText
+      });
+
       if (!response.ok) {
-        const errorText = await response.text();
         console.error('Error exchanging code:', {
           status: response.status,
           statusText: response.statusText,
-          error: errorText,
+          response: responseText
         });
-        throw new Error(`Failed to exchange code: ${response.status} ${response.statusText}`);
+        throw new Error(`Failed to exchange code: ${response.status} ${response.statusText} - ${responseText}`);
       }
 
-      console.log('Token response received:', { 
-        status: response.status,
-        hasAccessToken: !!response.headers.get('access_token'),
-        hasRefreshToken: !!response.headers.get('refresh_token'),
-        expiresIn: response.headers.get('expires_in')
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        console.error('Failed to parse response as JSON:', e);
+        throw new Error('Invalid response format from Reddit');
+      }
+
+      const { access_token, refresh_token, expires_in } = responseData;
+      
+      if (!access_token) {
+        console.error('No access token in response:', responseData);
+        throw new Error('No access token received from Reddit');
+      }
+
+      console.log('Token exchange successful:', {
+        hasAccessToken: !!access_token,
+        hasRefreshToken: !!refresh_token,
+        expiresIn: expires_in
       });
 
-      const { access_token, refresh_token, expires_in } = await response.json();
       return {
         access_token,
         refresh_token: refresh_token || '',
-        expires_at: Date.now() + expires_in * 1000,
+        expires_at: Date.now() + (expires_in * 1000),
       };
     } catch (error: any) {
-      console.error('Error exchanging code:', error);
+      console.error('Error in exchangeCode:', {
+        error: error.message,
+        stack: error.stack
+      });
       throw error;
     }
   }

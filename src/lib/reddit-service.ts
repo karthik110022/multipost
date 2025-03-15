@@ -268,6 +268,16 @@ export class RedditService {
     this.validateCredentials();
   }
 
+  private normalizeNetlifyUrl(url: string): string {
+    // Handle all Netlify preview URL patterns
+    if (url.includes('--multpost.netlify.app')) {
+      // Extract the base domain without any preview prefixes
+      const baseUrl = 'multpost.netlify.app';
+      return `https://${baseUrl}`;
+    }
+    return url;
+  }
+
   private validateCredentials() {
     try {
       console.log('Validating Reddit credentials...');
@@ -275,14 +285,19 @@ export class RedditService {
 
       const clientId = env.NEXT_PUBLIC_REDDIT_CLIENT_ID;
       const clientSecret = env.REDDIT_CLIENT_SECRET;
-      const appUrl = env.NEXT_PUBLIC_APP_URL;
+      let appUrl = env.NEXT_PUBLIC_APP_URL;
+
+      // Normalize the URL for Netlify previews
+      appUrl = this.normalizeNetlifyUrl(appUrl);
 
       console.log('Environment validation:', {
         clientIdPresent: !!clientId,
         clientIdValid: clientId.length > 0,
         clientSecretPresent: !!clientSecret,
         clientSecretValid: clientSecret.length > 0,
-        appUrl
+        originalAppUrl: env.NEXT_PUBLIC_APP_URL,
+        normalizedAppUrl: appUrl,
+        isPreviewUrl: env.NEXT_PUBLIC_APP_URL.includes('--multpost.netlify.app')
       });
 
       if (!clientId || !clientSecret) {

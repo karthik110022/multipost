@@ -2,6 +2,17 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { RedditService } from '@/lib/reddit-service';
+import { env } from '@/config/env';
+
+function normalizeNetlifyUrl(url: string): string {
+  // Handle all Netlify preview URL patterns
+  if (url.includes('--multpost.netlify.app')) {
+    // Extract the base domain without any preview prefixes
+    const baseUrl = 'multpost.netlify.app';
+    return `https://${baseUrl}`;
+  }
+  return url;
+}
 
 export async function GET(request: Request) {
   try {
@@ -11,24 +22,30 @@ export async function GET(request: Request) {
     const error = searchParams.get('error');
     const state = searchParams.get('state');
 
+    // Get the base URL for redirects
+    let baseUrl = normalizeNetlifyUrl(env.NEXT_PUBLIC_APP_URL);
+
     console.log('Callback parameters:', {
       hasCode: !!code,
       error,
       state,
-      url: request.url
+      url: request.url,
+      originalUrl: env.NEXT_PUBLIC_APP_URL,
+      normalizedUrl: baseUrl,
+      isPreviewUrl: env.NEXT_PUBLIC_APP_URL.includes('--multpost.netlify.app')
     });
 
     if (error) {
       console.error('Reddit OAuth error:', error);
       return NextResponse.redirect(
-        new URL(`/dashboard?error=${encodeURIComponent(error)}`, request.url)
+        new URL(`${baseUrl}/dashboard?error=${encodeURIComponent(error)}`)
       );
     }
 
     if (!code) {
       console.error('No code received from Reddit');
       return NextResponse.redirect(
-        new URL('/dashboard?error=no_code', request.url)
+        new URL(`${baseUrl}/dashboard?error=no_code`)
       );
     }
 
@@ -57,7 +74,7 @@ export async function GET(request: Request) {
     if (userError || !user) {
       console.error('Auth error:', userError);
       return NextResponse.redirect(
-        new URL('/auth/signin?error=auth_required', request.url)
+        new URL(`${baseUrl}/auth/signin?error=auth_required`)
       );
     }
 
@@ -76,7 +93,7 @@ export async function GET(request: Request) {
       if (!tokens.access_token) {
         console.error('Failed to get access token');
         return NextResponse.redirect(
-          new URL('/dashboard?error=token_error', request.url)
+          new URL(`${baseUrl}/dashboard?error=token_error`)
         );
       }
 
@@ -101,24 +118,27 @@ export async function GET(request: Request) {
       if (dbError) {
         console.error('Database error:', dbError);
         return NextResponse.redirect(
-          new URL('/dashboard?error=db_error', request.url)
+          new URL(`${baseUrl}/dashboard?error=db_error`)
         );
       }
 
       console.log('Reddit account connection successful');
-      return NextResponse.redirect(new URL('/dashboard?success=true', request.url));
+      return NextResponse.redirect(new URL(`${baseUrl}/dashboard?success=true`));
     } catch (error) {
       console.error('Error during token exchange or user info fetch:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       return NextResponse.redirect(
-        new URL(`/dashboard?error=${encodeURIComponent(errorMessage)}`, request.url)
+        new URL(`${baseUrl}/dashboard?error=${encodeURIComponent(errorMessage)}`)
       );
     }
   } catch (error) {
     console.error('Reddit callback error:', error);
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+    const baseUrl = env.NEXT_PUBLIC_APP_URL.includes('--multpost.netlify.app') 
+      ? 'https://multpost.netlify.app' 
+      : env.NEXT_PUBLIC_APP_URL;
     return NextResponse.redirect(
-      new URL(`/dashboard?error=${encodeURIComponent(errorMessage)}`, request.url)
+      new URL(`${baseUrl}/dashboard?error=${encodeURIComponent(errorMessage)}`)
     );
   }
 }

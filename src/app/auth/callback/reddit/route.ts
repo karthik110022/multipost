@@ -11,6 +11,10 @@ function normalizeNetlifyUrl(url: string): string {
     const baseUrl = 'multpost.netlify.app';
     return `https://${baseUrl}`;
   }
+  // If we're in production and the URL is localhost, use the Netlify URL
+  if (process.env.NODE_ENV === 'production' && url.includes('localhost')) {
+    return 'https://multpost.netlify.app';
+  }
   return url;
 }
 
@@ -25,6 +29,11 @@ export async function GET(request: Request) {
     // Get the base URL for redirects
     let baseUrl = normalizeNetlifyUrl(env.NEXT_PUBLIC_APP_URL);
 
+    // Ensure we're using HTTPS in production
+    if (process.env.NODE_ENV === 'production' && !baseUrl.startsWith('https://')) {
+      baseUrl = `https://${baseUrl.replace(/^https?:\/\//, '')}`;
+    }
+
     console.log('Callback parameters:', {
       hasCode: !!code,
       error,
@@ -32,7 +41,8 @@ export async function GET(request: Request) {
       url: request.url,
       originalUrl: env.NEXT_PUBLIC_APP_URL,
       normalizedUrl: baseUrl,
-      isPreviewUrl: env.NEXT_PUBLIC_APP_URL.includes('--multpost.netlify.app')
+      isPreviewUrl: env.NEXT_PUBLIC_APP_URL.includes('--multpost.netlify.app'),
+      environment: process.env.NODE_ENV
     });
 
     if (error) {

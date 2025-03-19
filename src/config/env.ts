@@ -29,7 +29,13 @@ const getBaseUrl = () => {
     return `${protocol}//${hostname}${port ? `:${port}` : ''}`;
   }
   
-  // For server-side local development
+  // For server-side
+  // In production, use the environment variable or default to the Netlify URL
+  if (process.env.NODE_ENV === 'production') {
+    return process.env.NEXT_PUBLIC_APP_URL || 'https://multpost.netlify.app';
+  }
+  
+  // Local development
   return 'http://localhost:3001';
 };
 

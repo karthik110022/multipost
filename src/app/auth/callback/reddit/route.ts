@@ -4,6 +4,10 @@ import { NextResponse } from 'next/server';
 import { RedditService } from '@/lib/reddit-service';
 import { env } from '@/config/env';
 
+// Force this route to be dynamic
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 function normalizeNetlifyUrl(url: string): string {
   // If the URL is undefined or invalid, use the Netlify URL
   if (!url || url === 'undefined' || url === 'https://undefined') {
@@ -87,14 +91,25 @@ export async function GET(request: Request) {
       }
     );
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    // Get the session instead of just the user
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-    if (userError || !user) {
-      console.error('Auth error:', userError);
+    if (sessionError || !session) {
+      console.error('Session error:', sessionError);
+      // Store the code in a cookie for later use
+      cookieStore.set('reddit_auth_code', code, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+      });
       return NextResponse.redirect(
-        new URL(`${baseUrl}/auth/signin?error=auth_required`)
+        new URL(`${baseUrl}/auth/signin?redirect=/auth/callback/reddit`)
       );
     }
+
+    const user = session.user;
+    console.log('User session found:', { userId: user.id });
 
     console.log('Initializing Reddit service...');
     const redditService = new RedditService();

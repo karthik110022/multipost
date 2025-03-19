@@ -56,8 +56,13 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  const publicPaths = ['/auth/signin', '/auth/signup', '/auth/verify-email'];
-  const isPublicPath = publicPaths.includes(request.nextUrl.pathname);
+  const publicPaths = [
+    '/auth/signin', 
+    '/auth/signup', 
+    '/auth/verify-email',
+    '/auth/callback/reddit'  // Add Reddit callback to public paths
+  ];
+  const isPublicPath = publicPaths.some(path => request.nextUrl.pathname.startsWith(path));
 
   // If user is not signed in and the current path is not public,
   // redirect the user to /auth/signin
@@ -68,7 +73,7 @@ export async function middleware(request: NextRequest) {
 
   // If user is signed in and trying to access a public path,
   // redirect them to /dashboard
-  if (user && isPublicPath) {
+  if (user && isPublicPath && !request.nextUrl.pathname.startsWith('/auth/callback/reddit')) {
     const redirectUrl = new URL('/dashboard', request.url);
     return NextResponse.redirect(redirectUrl);
   }
@@ -77,5 +82,15 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
+  matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - api (API routes)
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public folder
+     */
+    '/((?!api|_next/static|_next/image|favicon.ico|public).*)',
+  ],
 }

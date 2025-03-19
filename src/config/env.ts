@@ -7,13 +7,6 @@ const getPort = () => {
 };
 
 const getBaseUrl = () => {
-  // If we have a direct environment variable, use it
-  if (process.env.NEXT_PUBLIC_APP_URL && 
-      process.env.NEXT_PUBLIC_APP_URL !== 'undefined' && 
-      process.env.NEXT_PUBLIC_APP_URL !== 'https://undefined') {
-    return process.env.NEXT_PUBLIC_APP_URL;
-  }
-  
   // For client-side
   if (typeof window !== 'undefined') {
     const port = window.location.port;
@@ -32,7 +25,14 @@ const getBaseUrl = () => {
   // For server-side
   // In production, use the environment variable or default to the Netlify URL
   if (process.env.NODE_ENV === 'production') {
-    return process.env.NEXT_PUBLIC_APP_URL || 'https://multpost.netlify.app';
+    // If we have a valid environment variable, use it
+    if (process.env.NEXT_PUBLIC_APP_URL && 
+        process.env.NEXT_PUBLIC_APP_URL !== 'undefined' && 
+        process.env.NEXT_PUBLIC_APP_URL !== 'https://undefined') {
+      return process.env.NEXT_PUBLIC_APP_URL;
+    }
+    // Default to Netlify URL in production
+    return 'https://multpost.netlify.app';
   }
   
   // Local development

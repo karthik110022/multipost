@@ -5,16 +5,24 @@ import { RedditService } from '@/lib/reddit-service';
 import { env } from '@/config/env';
 
 function normalizeNetlifyUrl(url: string): string {
+  // If the URL is undefined or invalid, use the Netlify URL
+  if (!url || url === 'undefined' || url === 'https://undefined') {
+    return 'https://multpost.netlify.app';
+  }
+
   // Handle all Netlify preview URL patterns
   if (url.includes('--multpost.netlify.app')) {
     // Extract the base domain without any preview prefixes
     const baseUrl = 'multpost.netlify.app';
     return `https://${baseUrl}`;
   }
-  // If we're in production and the URL is localhost, use the Netlify URL
-  if (process.env.NODE_ENV === 'production' && url.includes('localhost')) {
+
+  // If we're in production and the URL is localhost or invalid, use the Netlify URL
+  if (process.env.NODE_ENV === 'production' && 
+      (url.includes('localhost') || !url.startsWith('https://'))) {
     return 'https://multpost.netlify.app';
   }
+
   return url;
 }
 

@@ -63,14 +63,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (email: string, password: string) => {
     console.log('Starting signup process...', { email });
-    console.log('App URL:', process.env.NEXT_PUBLIC_APP_URL);
+    
+    // Get the correct site URL
+    const siteUrl = typeof window !== 'undefined' 
+      ? window.location.origin 
+      : process.env.NEXT_PUBLIC_APP_URL || 'https://multpost.netlify.app';
+    
+    console.log('Site URL for redirect:', siteUrl);
     
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+          emailRedirectTo: `${siteUrl}/auth/callback`,
           data: {
             email: email,
           }

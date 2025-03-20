@@ -22,6 +22,8 @@ export default function SignUp() {
     setIsEmailSent(false);
 
     try {
+      console.log('Starting signup submission...', { email });
+
       // Validation
       if (!email || !password || !confirmPassword) {
         setError('Please fill in all fields');
@@ -50,15 +52,18 @@ export default function SignUp() {
         return;
       }
 
+      console.log('All validations passed, calling signUp...');
       const { error: signUpError } = await signUp(email, password);
       
       if (signUpError) {
+        console.error('SignUp error:', signUpError);
         if (signUpError.message.includes('already registered')) {
           setError('This email is already registered. Please sign in instead.');
         } else {
           setError(signUpError.message);
         }
       } else {
+        console.log('SignUp successful, showing email sent message');
         setIsEmailSent(true);
       }
     } catch (err) {

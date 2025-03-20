@@ -62,14 +62,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signUp = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+    console.log('Starting signup process...', { email });
+    console.log('App URL:', process.env.NEXT_PUBLIC_APP_URL);
+    
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+          data: {
+            email: email,
+          }
+        }
+      });
+
+      console.log('Signup response:', { data, error });
+      
+      if (error) {
+        console.error('Signup error:', error);
+      } else if (data) {
+        console.log('Signup successful:', data);
       }
-    });
-    return { error };
+
+      return { error };
+    } catch (err) {
+      console.error('Unexpected error during signup:', err);
+      return {
+        error: new Error('An unexpected error occurred during signup') as AuthError
+      };
+    }
   };
 
   const signIn = async (email: string, password: string) => {

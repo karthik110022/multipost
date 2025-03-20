@@ -60,7 +60,8 @@ export async function middleware(request: NextRequest) {
     '/auth/signin', 
     '/auth/signup', 
     '/auth/verify-email',
-    '/auth/callback/reddit'  // Add Reddit callback to public paths
+    '/auth/callback',  // Add email verification callback
+    '/auth/callback/reddit'  // Reddit callback
   ];
   const isPublicPath = publicPaths.some(path => request.nextUrl.pathname.startsWith(path));
 

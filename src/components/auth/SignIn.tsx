@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function SignIn() {
+// Client component that uses searchParams
+function SignInForm() {
   const { signIn } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -17,7 +18,7 @@ export default function SignIn() {
   
   useEffect(() => {
     // Check if user just registered
-    const registered = searchParams.get('registered');
+    const registered = searchParams?.get('registered');
     if (registered === 'true') {
       setSuccess('Account created successfully! Please sign in with your credentials.');
     }
@@ -167,5 +168,14 @@ export default function SignIn() {
         </form>
       </div>
     </div>
+  );
+}
+
+// Export a wrapper component with Suspense
+export default function SignIn() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <SignInForm />
+    </Suspense>
   );
 }

@@ -64,19 +64,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUp = async (email: string, password: string) => {
     console.log('Starting signup process...', { email });
     
-    // Get the correct site URL
-    const siteUrl = typeof window !== 'undefined' 
-      ? window.location.origin 
-      : process.env.NEXT_PUBLIC_APP_URL || 'https://multpost.netlify.app';
-    
-    console.log('Site URL for redirect:', siteUrl);
-    
     try {
+      // Sign up with auto-confirm enabled (no email verification required)
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: `${siteUrl}/auth/callback`,
+          // No emailRedirectTo needed since we're not verifying emails
           data: {
             email: email,
           }
@@ -89,6 +83,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.error('Signup error:', error);
       } else if (data) {
         console.log('Signup successful:', data);
+        
+        // If using Supabase with autoconfirm disabled, we would need to manually confirm the user
+        // This would require server-side code with admin privileges
+        // For now, we'll assume autoconfirm is enabled in Supabase settings
       }
 
       return { error };

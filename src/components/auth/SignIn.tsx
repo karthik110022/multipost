@@ -1,21 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 export default function SignIn() {
   const { signIn } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  
+  useEffect(() => {
+    // Check if user just registered
+    const registered = searchParams.get('registered');
+    if (registered === 'true') {
+      setSuccess('Account created successfully! Please sign in with your credentials.');
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccess(null);
     setLoading(true);
 
     try {
@@ -66,6 +77,16 @@ export default function SignIn() {
         </div>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+          {success && (
+            <div className="rounded-md bg-green-50 p-4">
+              <div className="flex">
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-green-800">{success}</h3>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="rounded-md shadow-sm -space-y-px">
             <div>
               <label htmlFor="email" className="sr-only">

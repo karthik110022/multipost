@@ -13,13 +13,13 @@ export default function SignUp() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [isEmailSent, setIsEmailSent] = useState(false);
+  // Removed isEmailSent state since we're redirecting to signin instead
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    setIsEmailSent(false);
+    // No longer need to set isEmailSent
 
     try {
       console.log('Starting signup submission...', { email });
@@ -63,8 +63,9 @@ export default function SignUp() {
           setError(signUpError.message);
         }
       } else {
-        console.log('SignUp successful, showing email sent message');
-        setIsEmailSent(true);
+        console.log('SignUp successful, redirecting to sign in page');
+        // Instead of showing email verification message, redirect to sign in page
+        router.push('/auth/signin?registered=true');
       }
     } catch (err) {
       console.error('Sign up error:', err);
@@ -74,26 +75,7 @@ export default function SignUp() {
     }
   };
 
-  if (isEmailSent) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-md w-full space-y-8 text-center">
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">Check your email</h2>
-          <p className="mt-2 text-sm text-gray-600">
-            We've sent you an email with a link to verify your account. Please check your inbox and follow the instructions.
-          </p>
-          <div className="mt-4">
-            <Link
-              href="/auth/signin"
-              className="text-blue-600 hover:text-blue-500"
-            >
-              Return to sign in
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // We no longer need the isEmailSent state and UI since we're redirecting to signin
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">

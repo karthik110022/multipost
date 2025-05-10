@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
+import AnalyticsCard from './AnalyticsCard';
 
 export default function DashboardClient() {
   const { user, loading } = useAuth();
@@ -30,6 +31,11 @@ export default function DashboardClient() {
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-2xl font-bold mb-8">Welcome to MultiPost</h1>
+      
+      {/* Analytics Section */}
+      <div className="mb-8">
+        <AnalyticsCard />
+      </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Link 
@@ -67,7 +73,7 @@ export default function DashboardClient() {
         </Link>
 
         <Link 
-          href="/posts"
+          href="/history"
           className="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
           <div className="flex items-start space-x-4">

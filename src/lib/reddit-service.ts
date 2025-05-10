@@ -222,7 +222,12 @@ interface RedditPostStats {
     name: string;
     count: number;
     icon_url: string;
+    coin_price: number;
   }>;
+  totalAwardValue: number;
+  score: number;
+  upvoteRatio: number;
+  viewCount: number;
 }
 
 interface RedditComment {
@@ -618,16 +623,26 @@ export class RedditService {
       
       console.log('Retrieved post data:', postData);
       
+      // Calculate total awards value
+      const totalAwardValue = (postData.all_awardings || []).reduce((sum: number, award: any) => {
+        return sum + (award.coin_price || 0) * award.count;
+      }, 0);
+      
       return {
         upvotes: postData.ups || 0,
         downvotes: postData.downs || 0,
         comments: postData.num_comments || 0,
-        shares: 0, // Reddit API doesn't provide share count
+        shares: postData.num_crossposts || 0, // Using crossposts as a proxy for shares
         awards: (postData.all_awardings || []).map((award: any) => ({
           name: award.name,
           count: award.count,
-          icon_url: award.icon_url
-        }))
+          icon_url: award.icon_url,
+          coin_price: award.coin_price || 0
+        })),
+        totalAwardValue,
+        score: postData.score || 0,
+        upvoteRatio: postData.upvote_ratio || 0,
+        viewCount: postData.view_count || 0
       };
     } catch (error: any) {
       console.error('Error fetching post stats:', error);
@@ -1215,6 +1230,51 @@ export class RedditService {
         }
       }
 
+      throw error;
+    }
+  }
+
+  async postCommentReply(accessToken: string, parentId: string, content: string): Promise<RedditComment> {
+    try {
+      console.log('Posting comment reply:', { parentId });
+      
+      const formData = new URLSearchParams();
+      formData.append('api_type', 'json');
+      formData.append('text', content);
+      formData.append('thing_id', parentId);
+
+      const response = await this.makeApiRequest<any>('/api/comment', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: formData.toString(),
+        accessToken
+      });
+
+      console.log('Comment reply response:', response);
+
+      if (response?.json?.errors?.length > 0) {
+        const [errorCode, errorMessage] = response.json.errors[0];
+        throw new Error(errorMessage || errorCode);
+      }
+
+      if (!response?.json?.data?.things?.[0]?.data) {
+        throw new Error('Failed to get comment data from response');
+      }
+
+      const commentData = response.json.data.things[0].data;
+      return {
+        id: commentData.id,
+        author: commentData.author,
+        body: commentData.body,
+        created_utc: commentData.created_utc,
+        score: commentData.score,
+        replies: []
+      };
+    } catch (error: any) {
+      console.error('Error posting comment reply:', error);
       throw error;
     }
   }

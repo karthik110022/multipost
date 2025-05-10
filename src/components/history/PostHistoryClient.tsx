@@ -190,7 +190,13 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
     const platformPostId = post.post_platforms?.[0]?.platform_post_id;
     if (!platformPostId) return null;
     
-    return `https://reddit.com/${platformPostId}`;
+    // If the platform_post_id already includes the full path, use it directly
+    if (platformPostId.startsWith('http')) {
+      return platformPostId;
+    }
+    
+    // Otherwise, construct the Reddit URL
+    return `https://reddit.com/comments/${platformPostId}`;
   };
 
   const getPostSubreddit = (post: Post) => {

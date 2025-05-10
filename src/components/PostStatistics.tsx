@@ -18,6 +18,7 @@ import { supabase } from '@/lib/supabase';
 interface PostStatsProps {
   postId: string;
   accountId: string;
+  onStatsUpdate?: (stats: PostStats) => void;
 }
 
 interface PostStats {
@@ -29,7 +30,12 @@ interface PostStats {
     name: string;
     count: number;
     icon_url: string;
+    coin_price: number;
   }>;
+  totalAwardValue: number;
+  score: number;
+  upvoteRatio: number;
+  viewCount: number;
 }
 
 interface PlatformData {
@@ -46,7 +52,7 @@ interface PlatformData {
   };
 }
 
-export function PostStatistics({ postId, accountId }: PostStatsProps) {
+export function PostStatistics({ postId, accountId, onStatsUpdate }: PostStatsProps) {
   const [stats, setStats] = useState<PostStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -200,6 +206,7 @@ export function PostStatistics({ postId, accountId }: PostStatsProps) {
           setStats(postStats);
           setRetryCount(0); // Reset retry count on success
           setLoading(false);
+          onStatsUpdate?.(postStats);
         }
       } catch (err) {
         console.error('Error fetching stats:', err);
@@ -225,7 +232,7 @@ export function PostStatistics({ postId, accountId }: PostStatsProps) {
         currentSubscription.unsubscribe();
       }
     };
-  }, [postId, accountId, retryCount]);
+  }, [postId, accountId, retryCount, onStatsUpdate]);
 
   if (loading) {
     return (
@@ -268,6 +275,9 @@ export function PostStatistics({ postId, accountId }: PostStatsProps) {
               <ArrowBigDown className="text-red-500" />
               <span className="ml-1">{stats.downvotes}</span>
             </div>
+            <div className="text-sm text-gray-500">
+              ({Math.round(stats.upvoteRatio * 100)}% upvoted)
+            </div>
           </div>
           
           <div className="flex items-center space-x-2">
@@ -283,6 +293,20 @@ export function PostStatistics({ postId, accountId }: PostStatsProps) {
           <div className="flex items-center space-x-2">
             <Award className="text-yellow-500" />
             <span>{stats.awards.reduce((sum, award) => sum + award.count, 0)} awards</span>
+            {stats.totalAwardValue > 0 && (
+              <span className="text-sm text-gray-500">
+                ({stats.totalAwardValue} coins)
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-4">
+          <div className="text-sm text-gray-500">
+            <span className="font-medium">Score:</span> {stats.score}
+          </div>
+          <div className="text-sm text-gray-500">
+            <span className="font-medium">Views:</span> {stats.viewCount.toLocaleString()}
           </div>
         </div>
 
@@ -298,6 +322,11 @@ export function PostStatistics({ postId, accountId }: PostStatsProps) {
                     className="w-4 h-4 mr-1"
                   />
                   {award.count}x {award.name}
+                  {award.coin_price > 0 && (
+                    <span className="ml-1 text-xs text-gray-500">
+                      ({award.coin_price} coins)
+                    </span>
+                  )}
                 </Badge>
               ))}
             </div>

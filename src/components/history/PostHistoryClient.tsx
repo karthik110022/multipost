@@ -7,6 +7,7 @@ import { format, parseISO } from 'date-fns';
 import { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { PostStatistics } from '@/components/PostStatistics';
 import CommentModal from '@/components/CommentModal';
+import { toast } from 'react-hot-toast';
 
 interface Post {
   id: string;
@@ -47,6 +48,7 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('all');
   const [selectedPost, setSelectedPost] = useState<{ id: string; accountId: string } | null>(null);
+  const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -231,6 +233,50 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
     }
   };
 
+  const handleDeletePost = async (postId: string, platformPostId?: string, socialAccountId?: string) => {
+    if (!confirm('Are you sure you want to delete this post? This action cannot be undone.')) {
+      return;
+    }
+
+    setDeletingPostId(postId);
+    try {
+      console.log('🗑️ Starting post deletion process:', {
+        postId,
+        platformPostId,
+        socialAccountId
+      });
+
+      // If the post was published to Reddit, use the Reddit deletion endpoint
+      const endpoint = platformPostId && socialAccountId
+        ? `/api/social/delete-reddit-post?postId=${postId}&platformPostId=${platformPostId}&socialAccountId=${socialAccountId}`
+        : `/api/social/delete-post?postId=${postId}`;
+
+      console.log('📤 Sending delete request to:', endpoint);
+      const response = await fetch(endpoint, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+      console.log('📥 Delete response:', data);
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to delete post');
+      }
+
+      toast.success('Post deleted successfully');
+      console.log('✅ Post deleted successfully');
+      setPosts(posts.filter(post => post.id !== postId));
+    } catch (error: any) {
+      console.error('❌ Error deleting post:', {
+        error: error.message,
+        stack: error.stack
+      });
+      toast.error(error.message || 'Failed to delete post');
+    } finally {
+      setDeletingPostId(null);
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-2xl font-bold mb-6">Post History</h1>
@@ -267,6 +313,8 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
             const postUrl = getPostUrl(post);
             const subreddit = getPostSubreddit(post);
             const account = getPostAccount(post);
+            const platformPostId = post.post_platforms?.[0]?.platform_post_id;
+            const socialAccountId = post.post_platforms?.[0]?.social_account_id;
             
             return (
               <div
@@ -275,7 +323,7 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
               >
                 <div className="flex justify-between items-start mb-4">
                   <h2 className="text-xl font-semibold">{post.title || 'Untitled Post'}</h2>
-                  <div className="flex space-x-2">
+                  <div className="flex items-center space-x-2">
                     <span
                       className={`px-2 py-1 rounded-full text-xs font-medium ${getPlatformColor(
                         account?.platform || post.platform
@@ -288,6 +336,27 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
                     >
                       {status}
                     </span>
+                    <button
+                      onClick={() => handleDeletePost(post.id, platformPostId, socialAccountId)}
+                      disabled={deletingPostId === post.id}
+                      className={`p-1 rounded-full hover:bg-red-100 transition-colors ${
+                        deletingPostId === post.id ? 'opacity-50 cursor-not-allowed' : ''
+                      }`}
+                      title="Delete post"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-5 w-5 text-red-500"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </button>
                   </div>
                 </div>
                 <p className="text-gray-600 mb-4">{post.content}</p>

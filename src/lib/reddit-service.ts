@@ -761,7 +761,7 @@ export class RedditService {
         state: 'random_state',
         redirect_uri: redirectUri,
         duration: 'permanent',
-        scope: 'identity submit read subscribe mysubreddits flair',
+        scope: 'identity submit read subscribe mysubreddits flair edit',
         prompt: 'consent'
       };
 
@@ -1136,6 +1136,86 @@ export class RedditService {
         peakHours: [],
         topKeywords: []
       };
+    }
+  }
+
+  async deletePost(accessToken: string, postId: string): Promise<void> {
+    const endpoint = `/api/del`;
+    console.log('🔍 RedditService.deletePost called with:', {
+      endpoint,
+      postId,
+      hasAccessToken: !!accessToken
+    });
+    
+    try {
+      console.log('📤 Sending delete request to Reddit API...');
+      console.log('Request details:', {
+        url: `https://oauth.reddit.com${endpoint}`,
+        method: 'POST',
+        body: `id=t3_${postId}`
+      });
+
+      // First verify the post exists and we have access to it
+      const verifyResponse = await this.makeApiRequest<any>(`/by_id/t3_${postId}`, {
+        method: 'GET',
+        accessToken
+      });
+
+      console.log('📥 Post verification response:', verifyResponse);
+
+      if (!verifyResponse?.data?.children?.[0]?.data) {
+        throw new Error('Post not found or not accessible');
+      }
+
+      // Now attempt to delete the post
+      const response = await this.makeApiRequest<any>(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `id=t3_${postId}`,
+        accessToken
+      });
+
+      console.log('📥 Reddit API response:', response);
+
+      // Check for errors in the response
+      if (response?.json?.errors?.length > 0) {
+        const errors = response.json.errors;
+        console.error('❌ Reddit API returned errors:', errors);
+        throw new Error(`Reddit API errors: ${JSON.stringify(errors)}`);
+      }
+
+      // An empty response with 200 status code indicates successful deletion
+      if (response === null || Object.keys(response).length === 0) {
+        console.log('✅ Post successfully deleted from Reddit (empty response indicates success)');
+        return;
+      }
+
+      // If we get here, something unexpected happened
+      console.error('❌ Unexpected Reddit API response:', response);
+      throw new Error('Unexpected response from Reddit API');
+    } catch (error: any) {
+      console.error('❌ Error in RedditService.deletePost:', {
+        error: error.message,
+        stack: error.stack,
+        postId,
+        response: error.response?.data
+      });
+
+      // Handle specific Reddit API errors
+      if (error.response?.data) {
+        const redditError = error.response.data;
+        if (redditError.reason === 'RATELIMIT') {
+          throw new Error('RATE_LIMITED');
+        }
+        if (redditError.message) {
+          throw new Error(redditError.message);
+        }
+      }
+
+      throw error;
     }
   }
 }

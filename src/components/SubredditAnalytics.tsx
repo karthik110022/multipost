@@ -14,18 +14,7 @@ import {
 } from 'recharts';
 import { AnalyticsLoading } from './ui/PageTransition';
 
-interface BestTimeRecommendation {
-  dayOfWeek: string;
-  hour: number;
-  engagement: number;
-}
-
-interface TimeDataPoint {
-  hour: number;
-  value: number;
-}
-
-interface EngagementMetrics {
+interface SubredditEngagementMetrics {
   avgScore: number;
   avgComments: number;
   peakHours: Array<{
@@ -50,6 +39,18 @@ interface EngagementMetrics {
   }>;
 }
 
+interface BestTimeRecommendation {
+  dayOfWeek: string;
+  hour: number;
+  engagement: number;
+}
+
+interface TimeDataPoint {
+  hour: number;
+  value: number;
+}
+
+
 interface SubredditAnalyticsProps {
   subreddit: string;
   accountId: string;
@@ -60,7 +61,7 @@ export default function SubredditAnalytics({ subreddit, accountId }: SubredditAn
   const [error, setError] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState<'timing' | 'engagement' | 'keywords'>('timing');
   const [bestTimes, setBestTimes] = useState<BestTimeRecommendation[]>([]);
-  const [engagement, setEngagement] = useState<EngagementMetrics | null>(null);
+  const [engagement, setEngagement] = useState<SubredditEngagementMetrics | null>(null);
 
   useEffect(() => {
     const fetchAnalytics = async () => {

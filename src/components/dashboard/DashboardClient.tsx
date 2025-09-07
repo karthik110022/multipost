@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { DashboardSkeleton } from '../ui/LoadingSkeleton';
+import AnalyticsCard from './AnalyticsCard';
 
 export default function DashboardClient() {
   const { user, loading } = useAuth();
@@ -33,13 +34,18 @@ export default function DashboardClient() {
     <div className={`container mx-auto px-4 py-8 transition-all duration-700 ${showContent ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
       <h1 className="text-3xl font-bold mb-8 bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent animate-slide-up">Welcome to MultiPost</h1>
       
+      {/* Analytics Card */}
+      <div className="mb-8">
+        <AnalyticsCard />
+      </div>
+      
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Link 
           href="/create-post"
           className="block p-6 bg-white rounded-lg shadow hover:shadow-lg transition-all duration-300 transform hover:scale-[1.02] hover:-translate-y-1 animate-slide-up-delay-2 group btn-ripple"
         >
           <div className="flex items-start space-x-4">
-            <div className="p-2 bg-gradient-to-r from-[#FF4500] to-[#FF6B35] bg-opacity-10 rounded-lg group-hover:bg-opacity-20 transition-all duration-300">
+            <div className="p-2 bg-[#FF4500] bg-opacity-20 rounded-lg group-hover:bg-opacity-30 transition-all duration-300">
               <svg className="w-6 h-6 text-[#FF4500] group-hover:scale-110 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
@@ -56,7 +62,7 @@ export default function DashboardClient() {
           className="block p-6 bg-white rounded-lg shadow hover:shadow-lg transition-all duration-300 transform hover:scale-[1.02] hover:-translate-y-1 animate-slide-up-delay-2 group btn-ripple"
         >
           <div className="flex items-start space-x-4">
-            <div className="p-2 bg-gradient-to-r from-[#FF4500] to-[#FF6B35] bg-opacity-10 rounded-lg group-hover:bg-opacity-20 transition-all duration-300">
+            <div className="p-2 bg-[#FF4500] bg-opacity-20 rounded-lg group-hover:bg-opacity-30 transition-all duration-300">
               <svg className="w-6 h-6 text-[#FF4500] group-hover:scale-110 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
               </svg>
@@ -73,7 +79,7 @@ export default function DashboardClient() {
           className="block p-6 bg-white rounded-lg shadow hover:shadow-lg transition-all duration-300 transform hover:scale-[1.02] hover:-translate-y-1 animate-slide-up-delay-3 group btn-ripple"
         >
           <div className="flex items-start space-x-4">
-            <div className="p-2 bg-gradient-to-r from-[#FF4500] to-[#FF6B35] bg-opacity-10 rounded-lg group-hover:bg-opacity-20 transition-all duration-300">
+            <div className="p-2 bg-[#FF4500] bg-opacity-20 rounded-lg group-hover:bg-opacity-30 transition-all duration-300">
               <svg className="w-6 h-6 text-[#FF4500] group-hover:scale-110 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>

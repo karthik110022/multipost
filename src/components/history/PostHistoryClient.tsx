@@ -8,6 +8,7 @@ import { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { PostStatistics } from '@/components/PostStatistics';
 import CommentModal from '@/components/CommentModal';
 import { toast } from 'react-hot-toast';
+import { socialMediaService } from '@/lib/social-media-service';
 
 interface Post {
   id: string;
@@ -49,6 +50,7 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
   const [filter, setFilter] = useState<string>('all');
   const [selectedPost, setSelectedPost] = useState<{ id: string; accountId: string } | null>(null);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
+  const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -65,10 +67,25 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
   };
 
   useEffect(() => {
-    async function fetchPosts() {
+    async function fetchPostsAndActiveAccount() {
       try {
         setLoading(true);
         setError(null);
+        
+        // Fetch active account, fallback to any connected account
+        console.log('Fetching active account...');
+        let activeAccount = await socialMediaService.getActiveAccount();
+        
+        // If no active account, use the first connected account
+        if (!activeAccount) {
+          console.log('No active account found, fetching connected accounts...');
+          const connectedAccounts = await socialMediaService.getConnectedAccounts();
+          activeAccount = connectedAccounts.length > 0 ? connectedAccounts[0] : null;
+          console.log('Using first connected account:', activeAccount);
+        }
+        
+        setActiveAccountId(activeAccount?.id || null);
+        console.log('Using account for statistics:', activeAccount);
         
         console.log('Fetching posts...');
         const { data: posts, error } = await supabase
@@ -99,7 +116,7 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
         console.log('Fetched posts:', posts);
         setPosts(posts || []);
       } catch (error) {
-        console.error('Error in fetchPosts:', error);
+        console.error('Error in fetchPostsAndActiveAccount:', error);
         setError('Failed to load posts');
       } finally {
         setLoading(false);
@@ -107,7 +124,7 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
     }
 
     // Initial fetch
-    fetchPosts();
+    fetchPostsAndActiveAccount();
 
     // Subscribe to post_platforms changes
     const subscription = supabase
@@ -394,11 +411,11 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
                     Posted to r/{subreddit}
                   </div>
                 )}
-                {post.post_platforms?.[0]?.platform_post_id && post.post_platforms?.[0]?.social_account_id && (
+                {post.post_platforms?.[0]?.platform_post_id && activeAccountId && (
                   <div className="mt-4">
                     <PostStatistics 
                       postId={post.id} 
-                      accountId={post.post_platforms[0].social_account_id} 
+                      accountId={activeAccountId} 
                     />
                   </div>
                 )}

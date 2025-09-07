@@ -66,7 +66,7 @@ export function PostStatistics({ postId, accountId, onStatsUpdate }: PostStatsPr
 
     const fetchStats = async () => {
       if (!postId || !accountId) {
-        console.log('Missing postId or accountId');
+        console.log('Missing postId or accountId', { postId, accountId });
         setError('Missing required data');
         setLoading(false);
         return;
@@ -75,7 +75,7 @@ export function PostStatistics({ postId, accountId, onStatsUpdate }: PostStatsPr
       try {
         console.log('Checking post status...', { postId, accountId, retryCount });
         
-        // Direct query for the platform record
+        // Direct query for the platform record - don't match social_account_id since it may be old/deleted
         const { data: platformData, error: platformError } = await supabase
           .from('post_platforms')
           .select(`
@@ -86,7 +86,6 @@ export function PostStatistics({ postId, accountId, onStatsUpdate }: PostStatsPr
             )
           `)
           .eq('post_id', postId)
-          .eq('social_account_id', accountId)
           .single();
 
         if (platformError) {
@@ -106,7 +105,7 @@ export function PostStatistics({ postId, accountId, onStatsUpdate }: PostStatsPr
           return;
         }
 
-        if (platformData.status !== 'published') {
+        if (platformData.status !== 'published' && platformData.status !== 'success') {
           console.log('Post not yet published.', {
             currentStatus: platformData.status,
             retryCount,

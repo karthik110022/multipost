@@ -172,7 +172,9 @@ export default function PostHistoryClient({ user, initialPosts }: PostHistoryCli
   // Filter posts based on platform
   const filteredPosts = posts.filter((post) => {
     if (filter === 'all') return true;
-    const platform = post.post_platforms?.[0]?.social_accounts?.platform || post.platform;
+    const platform = post.post_platforms?.[0]?.social_accounts?.platform || post.platform || 'reddit';
+    // Handle case where platform might be undefined or null
+    if (!platform) return filter === 'reddit'; // Default to reddit if no platform info
     return platform.toLowerCase() === filter.toLowerCase();
   });
 

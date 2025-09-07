@@ -13,16 +13,16 @@ export default function Navigation() {
   };
 
   const linkClass = (path: string) =>
-    `px-3 py-2 rounded-md text-sm font-medium ${
+    `px-3 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
       isActive(path)
         ? 'bg-[#FF4500] text-white'
-        : 'text-gray-700 hover:bg-[#FF4500] hover:text-white'
+        : 'text-gray-700 hover:bg-[#FF4500] hover:text-white hover:scale-105'
     }`;
 
   if (!user) return null;
 
   return (
-    <nav className="bg-white shadow-sm">
+    <nav className="sticky top-0 z-50 bg-white/95 backdrop-blur-md shadow-sm border-b border-gray-100 transition-all duration-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           <div className="flex items-center">

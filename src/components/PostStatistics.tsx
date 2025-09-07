@@ -63,49 +63,6 @@ export function PostStatistics({ postId, accountId, onStatsUpdate }: PostStatsPr
   useEffect(() => {
     let isMounted = true;
     let retryTimeout: NodeJS.Timeout;
-    let currentSubscription: any = null;
-
-    const setupSubscription = (platformId: string) => {
-      // Clean up existing subscription if any
-      if (currentSubscription) {
-        console.log('Cleaning up existing subscription');
-        currentSubscription.unsubscribe();
-      }
-
-      console.log('Setting up new subscription for platform:', platformId);
-      currentSubscription = supabase
-        .channel(`post-stats-${platformId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'post_platforms',
-            filter: `id=eq.${platformId}`
-          },
-          async (payload) => {
-            console.log('Post platform update received:', {
-              event: payload.eventType,
-              old: payload.old,
-              new: payload.new,
-              timestamp: new Date().toISOString()
-            });
-            
-            if (isMounted) {
-              console.log('Component is mounted, refreshing data...');
-              // Force an immediate check
-              await fetchStats();
-              // Reset retry count to allow more retries if needed
-              setRetryCount(0);
-            } else {
-              console.log('Component is unmounted, ignoring update');
-            }
-          }
-        )
-        .subscribe((status) => {
-          console.log('Subscription status:', status);
-        });
-    };
 
     const fetchStats = async () => {
       if (!postId || !accountId) {
@@ -148,9 +105,6 @@ export function PostStatistics({ postId, accountId, onStatsUpdate }: PostStatsPr
           setLoading(false);
           return;
         }
-
-        // Set up subscription for this platform
-        setupSubscription(platformData.id);
 
         if (platformData.status !== 'published') {
           console.log('Post not yet published.', {
@@ -227,10 +181,6 @@ export function PostStatistics({ postId, accountId, onStatsUpdate }: PostStatsPr
         console.log('Cleaning up retry timeout');
         clearTimeout(retryTimeout);
       }
-      console.log('Cleaning up Supabase subscription');
-      if (currentSubscription) {
-        currentSubscription.unsubscribe();
-      }
     };
   }, [postId, accountId, retryCount, onStatsUpdate]);
 
@@ -238,10 +188,23 @@ export function PostStatistics({ postId, accountId, onStatsUpdate }: PostStatsPr
     return (
       <Card>
         <CardContent className="p-4">
-          <div className="space-y-2">
-            <Skeleton className="h-4 w-[200px]" />
-            <Skeleton className="h-4 w-[150px]" />
-            <Skeleton className="h-4 w-[180px]" />
+          <div className="space-y-3 animate-pulse">
+            <div className="flex items-center space-x-2">
+              <div className="h-5 w-5 bg-gray-200 rounded animate-pulse"></div>
+              <div className="h-4 w-16 bg-gray-200 rounded animate-pulse"></div>
+              <div className="h-4 w-12 bg-gray-200 rounded animate-pulse"></div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {Array.from({ length: 4 }, (_, i) => (
+                <div key={i} className="flex items-center space-x-2">
+                  <div className="h-4 w-4 bg-gray-200 rounded animate-pulse"></div>
+                  <div className="h-4 w-12 bg-gray-200 rounded animate-pulse"></div>
+                </div>
+              ))}
+            </div>
+            <div className="text-center py-2">
+              <div className="text-sm text-gray-500">Loading post statistics...</div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -251,8 +214,18 @@ export function PostStatistics({ postId, accountId, onStatsUpdate }: PostStatsPr
   if (error) {
     return (
       <Card>
-        <CardContent className="p-4 text-red-500">
-          {error}
+        <CardContent className="p-4">
+          <div className="flex items-center space-x-3">
+            <div className="flex-shrink-0">
+              <svg className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm text-red-600 font-medium">Analytics Unavailable</p>
+              <p className="text-sm text-gray-500 mt-1">{error}</p>
+            </div>
+          </div>
         </CardContent>
       </Card>
     );

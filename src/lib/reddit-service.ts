@@ -260,6 +260,18 @@ interface SubredditEngagementMetrics {
     keyword: string;
     frequency: number;
   }>;
+  upvotesByTime: Array<{
+    hour: number;
+    upvotes: number;
+  }>;
+  commentsByTime: Array<{
+    hour: number;
+    comments: number;
+  }>;
+  awardsByTime: Array<{
+    hour: number;
+    awards: number;
+  }>;
 }
 
 export class RedditService {
@@ -1097,22 +1109,49 @@ export class RedditService {
       const avgScore = allPosts.reduce((sum, post) => sum + post.score, 0) / allPosts.length;
       const avgComments = allPosts.reduce((sum, post) => sum + post.num_comments, 0) / allPosts.length;
 
-      // Analyze peak hours
-      const hourlyEngagement = new Map<number, { total: number; count: number }>();
+      // Analyze hourly engagement patterns
+      const hourlyEngagement = new Map<number, { totalScore: number; totalComments: number; totalAwards: number; count: number }>();
+      
       allPosts.forEach(post => {
         const hour = new Date(post.created_utc * 1000).getHours();
-        const engagement = post.score + post.num_comments;
-        const current = hourlyEngagement.get(hour) || { total: 0, count: 0 };
+        const current = hourlyEngagement.get(hour) || { totalScore: 0, totalComments: 0, totalAwards: 0, count: 0 };
         hourlyEngagement.set(hour, {
-          total: current.total + engagement,
+          totalScore: current.totalScore + post.score,
+          totalComments: current.totalComments + post.num_comments,
+          totalAwards: current.totalAwards + (post.total_awards_received || 0),
           count: current.count + 1
         });
+      });
+
+      // Generate data for all 24 hours
+      const upvotesByTime = Array.from({ length: 24 }, (_, hour) => {
+        const data = hourlyEngagement.get(hour);
+        return {
+          hour,
+          upvotes: data ? Math.round(data.totalScore / data.count) : 0
+        };
+      });
+
+      const commentsByTime = Array.from({ length: 24 }, (_, hour) => {
+        const data = hourlyEngagement.get(hour);
+        return {
+          hour,
+          comments: data ? Math.round(data.totalComments / data.count) : 0
+        };
+      });
+
+      const awardsByTime = Array.from({ length: 24 }, (_, hour) => {
+        const data = hourlyEngagement.get(hour);
+        return {
+          hour,
+          awards: data ? Math.round(data.totalAwards / data.count) : 0
+        };
       });
 
       const peakHours = Array.from(hourlyEngagement.entries())
         .map(([hour, data]) => ({
           hour,
-          engagement: data.total / data.count
+          engagement: (data.totalScore + data.totalComments) / data.count
         }))
         .sort((a, b) => b.engagement - a.engagement)
         .slice(0, 6);
@@ -1141,7 +1180,10 @@ export class RedditService {
         avgScore,
         avgComments,
         peakHours,
-        topKeywords
+        topKeywords,
+        upvotesByTime,
+        commentsByTime,
+        awardsByTime
       };
     } catch (error) {
       console.error('Error analyzing subreddit engagement:', error);
@@ -1149,7 +1191,10 @@ export class RedditService {
         avgScore: 0,
         avgComments: 0,
         peakHours: [],
-        topKeywords: []
+        topKeywords: [],
+        upvotesByTime: Array.from({ length: 24 }, (_, hour) => ({ hour, upvotes: 0 })),
+        commentsByTime: Array.from({ length: 24 }, (_, hour) => ({ hour, comments: 0 })),
+        awardsByTime: Array.from({ length: 24 }, (_, hour) => ({ hour, awards: 0 }))
       };
     }
   }

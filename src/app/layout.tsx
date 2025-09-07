@@ -21,12 +21,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="light">
-      <body className={`${inter.className} text-gray-900 dark:text-gray-100`}>
+    <html lang="en" className="scroll-smooth">
+      <body className={`${inter.className} text-gray-900 bg-gray-50`}>
         <AuthProvider>
           <AnalyticsProvider>
             <Navigation />
-            <main className="min-h-screen bg-gray-50 dark:bg-gray-900">
+            <main className="min-h-screen bg-gray-50 pt-0">
               {children}
             </main>
             <div id="analytics-container" />

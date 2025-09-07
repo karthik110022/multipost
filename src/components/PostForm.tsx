@@ -6,6 +6,7 @@ import { toast } from 'react-hot-toast';
 import { socialMediaService } from '@/lib/social-media-service';
 import type { SocialAccount } from '@/lib/social-media-service';
 import { useAnalytics } from './AnalyticsProvider';
+import { LoadingButton } from './ui/PageTransition';
 
 interface PostFormData {
   content: string;
@@ -233,8 +234,8 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <form onSubmit={handleSubmit} className="space-y-6">
+    <div className="max-w-4xl mx-auto animate-fade-in">
+      <form onSubmit={handleSubmit} className="space-y-6 animate-slide-up">
         <div className="mb-4">
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Select Accounts
@@ -253,7 +254,7 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
                         : prev.selectedAccounts.filter(id => id !== account.id)
                     }));
                   }}
-                  className="rounded border-gray-300"
+                  className="rounded border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
                 />
                 <span>{account.accountName} ({account.platform})</span>
               </label>
@@ -293,7 +294,7 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
                 type="text"
                 value={formData.title}
                 onChange={e => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                className="w-full p-2 border rounded bg-white text-gray-900 border-gray-300"
+                className="w-full p-3 border rounded-lg bg-white text-gray-900 border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 hover:border-gray-400"
                 required
               />
             </div>
@@ -316,7 +317,7 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
                     <select
                       value={selectedSubreddit?.subreddit || ''}
                       onChange={e => handleSubredditChange(accountId, e.target.value)}
-                      className="w-full p-2 border rounded bg-white text-gray-900 border-gray-300"
+                      className="w-full p-3 border rounded-lg bg-white text-gray-900 border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 hover:border-gray-400"
                       required
                     >
                       <option value="">Select a subreddit</option>
@@ -340,7 +341,7 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
                       <select
                         value={selectedSubreddit.flairId || ''}
                         onChange={e => handleFlairChange(accountId, e.target.value)}
-                        className="w-full p-2 border rounded bg-white text-gray-900 border-gray-300"
+                        className="w-full p-3 border rounded-lg bg-white text-gray-900 border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 hover:border-gray-400"
                       >
                         <option value="">No flair</option>
                         {loadingFlairs[`${accountId}-${selectedSubreddit.subreddit}`] ? (
@@ -366,7 +367,7 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
               <textarea
                 value={formData.content}
                 onChange={e => setFormData(prev => ({ ...prev, content: e.target.value }))}
-                className="w-full p-2 border rounded bg-white text-gray-900 border-gray-300"
+                className="w-full p-3 border rounded-lg bg-white text-gray-900 border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 hover:border-gray-400"
                 rows={4}
                 required
               />
@@ -375,33 +376,48 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
         )}
 
         {showResults && postResults.length > 0 && (
-          <div className="mt-6 space-y-4">
-            <h3 className="text-lg font-medium">Post Results:</h3>
-            <div className="divide-y divide-gray-200">
+          <div className="mt-6 space-y-4 animate-slide-up">
+            <h3 className="text-lg font-medium text-gray-900">Post Results:</h3>
+            <div className="divide-y divide-gray-200 bg-gray-50 rounded-lg p-4">
               {postResults.map((result, index) => {
                 const account = accounts.find(acc => acc.id === result.accountId);
                 return (
-                  <div key={index} className="py-4">
-                    <div className="flex items-center space-x-2">
-                      <div className={`w-2 h-2 rounded-full ${result.success ? 'bg-green-500' : 'bg-red-500'}`} />
-                      <span className="font-medium">
-                        {account?.accountName} ({account?.platform})
+                  <div key={index} className={`py-4 first:pt-0 last:pb-0 animate-slide-up-delay-${Math.min(index + 1, 4)}`}>
+                    <div className="flex items-center space-x-3">
+                      <div className={`w-3 h-3 rounded-full ${result.success ? 'bg-green-500 animate-pulse' : 'bg-red-500'} shadow-sm`} />
+                      <span className="font-medium text-gray-900">
+                        {account?.accountName}
                       </span>
-                      <span className="text-gray-500">→</span>
-                      <span className="text-gray-700">
+                      <span className="text-xs px-2 py-1 bg-gray-200 text-gray-600 rounded-full">
+                        {account?.platform}
+                      </span>
+                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                      <span className="text-gray-700 font-mono text-sm">
                         r/{result.subreddit}
                       </span>
                     </div>
                     {result.success ? (
-                      <p className="mt-1 text-sm text-green-600">
-                        Post created successfully
-                      </p>
+                      <div className="mt-2 flex items-center space-x-2">
+                        <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        <p className="text-sm text-green-600 font-medium">
+                          Post created successfully
+                        </p>
+                      </div>
                     ) : (
-                      <p className="mt-1 text-sm text-red-600">
-                        {result.error === 'INSUFFICIENT_KARMA' 
-                          ? `Not enough karma to post in r/${result.subreddit}`
-                          : result.error || 'Failed to create post'}
-                      </p>
+                      <div className="mt-2 flex items-start space-x-2">
+                        <svg className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                        <p className="text-sm text-red-600">
+                          {result.error === 'INSUFFICIENT_KARMA' 
+                            ? `Not enough karma to post in r/${result.subreddit}`
+                            : result.error || 'Failed to create post'}
+                        </p>
+                      </div>
                     )}
                   </div>
                 );
@@ -419,13 +435,25 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
         <button
           type="submit"
           disabled={isSubmitting}
-          className={`w-full py-2 px-4 rounded ${
+          className={`w-full py-3 px-6 rounded-lg font-medium transition-all duration-300 transform btn-ripple ${
             isSubmitting
-              ? 'bg-gray-400 cursor-not-allowed'
-              : 'bg-blue-500 hover:bg-blue-600'
+              ? 'bg-gray-400 cursor-not-allowed opacity-70'
+              : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]'
           } text-white`}
         >
-          {isSubmitting ? 'Creating Posts...' : isScheduled ? 'Schedule Posts' : 'Create Posts'}
+          {isSubmitting ? (
+            <div className="flex items-center justify-center space-x-2">
+              <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div>
+              <span>Creating Posts...</span>
+            </div>
+          ) : (
+            <span className="flex items-center justify-center space-x-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              </svg>
+              <span>{isScheduled ? 'Schedule Posts' : 'Create Posts'}</span>
+            </span>
+          )}
         </button>
       </form>
     </div>

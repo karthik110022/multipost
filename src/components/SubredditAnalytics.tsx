@@ -12,6 +12,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
+import { AnalyticsLoading } from './ui/PageTransition';
 
 interface BestTimeRecommendation {
   dayOfWeek: string;
@@ -63,6 +64,12 @@ export default function SubredditAnalytics({ subreddit, accountId }: SubredditAn
 
   useEffect(() => {
     const fetchAnalytics = async () => {
+      if (!subreddit || !accountId) {
+        setError('Missing subreddit or account information');
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
@@ -81,22 +88,9 @@ export default function SubredditAnalytics({ subreddit, accountId }: SubredditAn
         }));
 
         setBestTimes(transformedBestTimes);
-        setEngagement({
-          ...engagementMetrics,
-          upvotesByTime: Array.from({ length: 24 }, (_, i) => ({
-            hour: i,
-            upvotes: Math.floor(Math.random() * 1000) // Replace with actual data
-          })),
-          commentsByTime: Array.from({ length: 24 }, (_, i) => ({
-            hour: i,
-            comments: Math.floor(Math.random() * 100) // Replace with actual data
-          })),
-          awardsByTime: Array.from({ length: 24 }, (_, i) => ({
-            hour: i,
-            awards: Math.floor(Math.random() * 10) // Replace with actual data
-          }))
-        });
+        setEngagement(engagementMetrics);
       } catch (err) {
+        console.error('Analytics fetch error:', err);
         setError(err instanceof Error ? err.message : 'Failed to fetch analytics');
       } finally {
         setLoading(false);
@@ -107,11 +101,42 @@ export default function SubredditAnalytics({ subreddit, accountId }: SubredditAn
   }, [subreddit, accountId]);
 
   if (loading) {
-    return <div className="animate-pulse">Loading analytics...</div>;
+    return (
+      <div className="space-y-4 animate-fade-in">
+        <div className="flex items-center space-x-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
+          <div className="relative">
+            <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-blue-600"></div>
+            <div className="animate-ping absolute top-0 left-0 rounded-full h-6 w-6 border-2 border-blue-400 opacity-30"></div>
+          </div>
+          <div>
+            <span className="text-sm font-medium text-blue-800">Loading analytics for r/{subreddit}</span>
+            <p className="text-xs text-blue-600 mt-1">Fetching real-time Reddit data...</p>
+          </div>
+        </div>
+        <AnalyticsLoading />
+      </div>
+    );
   }
 
   if (error) {
-    return <div className="text-red-500">Error: {error}</div>;
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <div className="flex items-start space-x-3">
+          <div className="flex-shrink-0">
+            <svg className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-sm font-medium text-red-800">Analytics Failed to Load</h3>
+            <p className="text-sm text-red-700 mt-1">{error}</p>
+            <p className="text-xs text-red-600 mt-2">
+              This might be due to Reddit API limitations or account permissions.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

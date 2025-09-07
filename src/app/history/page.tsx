@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import PostHistoryClient from '@/components/history/PostHistoryClient';
+import NoAccountsMessage from '@/components/NoAccountsMessage';
 
 export default async function PostHistory() {
   const cookieStore = cookies();
@@ -27,6 +28,24 @@ export default async function PostHistory() {
 
   if (!user) {
     redirect('/auth/signin');
+  }
+
+  // Check if user has any connected social accounts
+  const { data: accounts } = await supabase
+    .from('social_accounts')
+    .select('id')
+    .eq('user_id', user.id);
+
+  const hasAccounts = accounts && accounts.length > 0;
+
+  if (!hasAccounts) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="container mx-auto px-4 py-8">
+          <NoAccountsMessage />
+        </div>
+      </div>
+    );
   }
 
   // Fetch posts from Supabase

@@ -6,6 +6,11 @@ import { format } from 'date-fns';
 import PostForm from '@/components/PostForm';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'react-hot-toast';
+import NoAccountsMessage from '@/components/NoAccountsMessage';
+import { useRouter } from 'next/navigation';
+import { AnalyticsProvider } from '@/components/AnalyticsProvider';
+import AnalyticsDisplay from '@/components/AnalyticsDisplay';
+import { LoadingButton } from '@/components/ui/PageTransition';
 
 interface ScheduledPost {
   id: string;
@@ -21,15 +26,33 @@ export default function ScheduledPosts() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
+  const [hasAccounts, setHasAccounts] = useState<boolean | null>(null);
   const { user } = useAuth();
+  const router = useRouter();
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
   useEffect(() => {
+    if (!user) {
+      router.push('/auth/signin');
+      return;
+    }
+    checkAccounts();
     fetchScheduledPosts();
-  }, []);
+  }, [user]);
+
+  const checkAccounts = async () => {
+    if (!user) return;
+    
+    const { data: accounts } = await supabase
+      .from('social_accounts')
+      .select('id')
+      .eq('user_id', user.id);
+
+    setHasAccounts(accounts && accounts.length > 0);
+  };
 
   const fetchScheduledPosts = async () => {
     try {
@@ -87,10 +110,20 @@ export default function ScheduledPosts() {
     }
   };
 
-  if (loading) {
+  if (loading || hasAccounts === null) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+      </div>
+    );
+  }
+
+  if (!hasAccounts) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="container mx-auto px-4 py-8">
+          <NoAccountsMessage />
+        </div>
       </div>
     );
   }
@@ -101,19 +134,48 @@ export default function ScheduledPosts() {
         <h1 className="text-2xl font-bold">Scheduled Posts</h1>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+          className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 font-medium transition-all duration-200 hover:scale-105 active:scale-95"
         >
           {showForm ? 'Hide Form' : 'Create Scheduled Post'}
         </button>
       </div>
 
       {showForm && (
-        <div className="mb-8 p-6 bg-white rounded-lg shadow">
-          <h2 className="text-xl font-semibold mb-4">Create Scheduled Post</h2>
-          <PostForm user={user} isScheduled={true} onPostCreated={() => {
-            setShowForm(false);
-            fetchScheduledPosts();
-          }} />
+        <div className="mb-8">
+          <AnalyticsProvider>
+            <div className="flex flex-col lg:flex-row gap-8">
+              {/* Main Content - Post Form */}
+              <div className="lg:w-[60%]">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+                  <div className="p-6 border-b border-gray-100">
+                    <h2 className="text-2xl font-bold text-gray-900">Create Scheduled Post</h2>
+                    <p className="text-gray-600 mt-1">Schedule your content for later posting</p>
+                  </div>
+                  <div className="p-6">
+                    <PostForm user={user} isScheduled={true} onPostCreated={() => {
+                      setShowForm(false);
+                      fetchScheduledPosts();
+                    }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Sidebar - Analytics */}
+              <div className="lg:w-[40%] lg:sticky lg:top-8 self-start">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+                  <div className="p-6 border-b border-gray-100">
+                    <h2 className="text-xl font-semibold text-gray-900">Post Analytics</h2>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Get insights to optimize your post's performance
+                    </p>
+                  </div>
+                  <div className="p-6">
+                    <AnalyticsDisplay />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </AnalyticsProvider>
         </div>
       )}
 
@@ -138,27 +200,31 @@ export default function ScheduledPosts() {
                   >
                     {post.status}
                   </span>
-                  <button
+                  <LoadingButton
                     onClick={() => handleDeletePost(post.id)}
-                    disabled={deletingPostId === post.id}
-                    className={`p-1 rounded-full hover:bg-red-100 transition-colors ${
-                      deletingPostId === post.id ? 'opacity-50 cursor-not-allowed' : ''
-                    }`}
-                    title="Delete post"
+                    loading={deletingPostId === post.id}
+                    className="p-2 rounded-full hover:bg-red-100 transition-colors text-red-500 hover:text-red-700"
+                    disabled={deletingPostId !== null}
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5 text-red-500"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </button>
+                    {deletingPostId === post.id ? (
+                      <div className="h-5 w-5 flex items-center justify-center">
+                        <div className="animate-spin rounded-full h-3 w-3 border-t-2 border-b-2 border-red-500"></div>
+                      </div>
+                    ) : (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-5 w-5"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    )}
+                  </LoadingButton>
                 </div>
               </div>
               <p className="text-gray-600 mb-4 line-clamp-2">{post.content}</p>

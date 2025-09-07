@@ -731,6 +731,18 @@ export class SocialMediaService {
       keyword: string;
       frequency: number;
     }>;
+    upvotesByTime: Array<{
+      hour: number;
+      upvotes: number;
+    }>;
+    commentsByTime: Array<{
+      hour: number;
+      comments: number;
+    }>;
+    awardsByTime: Array<{
+      hour: number;
+      awards: number;
+    }>;
   }> {
     const account = await this.getAccount(accountId);
     if (!account?.accessToken) {

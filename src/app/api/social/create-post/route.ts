@@ -33,8 +33,36 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = await request.json();
-    const { title, content, posts } = body;
+    // Handle both JSON and FormData requests
+    let title: string, content: string, posts: any[], images: File[] = [], videos: File[] = [];
+    
+    const contentType = request.headers.get('content-type');
+    
+    if (contentType?.includes('multipart/form-data')) {
+      // Handle FormData (with media files)
+      const formData = await request.formData();
+      title = formData.get('title') as string;
+      content = formData.get('content') as string;
+      posts = JSON.parse(formData.get('posts') as string);
+      
+      // Extract media files (images and videos)
+      const mediaCount = parseInt(formData.get('mediaCount') as string || '0');
+      for (let i = 0; i < mediaCount; i++) {
+        const mediaFile = formData.get(`media_${i}`) as File;
+        if (mediaFile) {
+          // Separate images and videos
+          if (mediaFile.type.startsWith('video/')) {
+            videos.push(mediaFile);
+          } else if (mediaFile.type.startsWith('image/')) {
+            images.push(mediaFile);
+          }
+        }
+      }
+    } else {
+      // Handle JSON (text-only posts)
+      const body = await request.json();
+      ({ title, content, posts } = body);
+    }
 
     if (!title || !content || !posts || !Array.isArray(posts) || posts.length === 0) {
       return new NextResponse(
@@ -54,8 +82,15 @@ export async function POST(request: Request) {
     }
 
     const socialMediaService = new SocialMediaService(supabase);
-    // Fix parameter order: title, content, posts (was passing content first)
-    const result = await socialMediaService.createPost(title, content, posts);
+    // Pass both images and videos if provided
+    const result = await socialMediaService.createPost(
+      title, 
+      content, 
+      posts, 
+      images.length > 0 ? images : undefined, 
+      user.id,
+      videos.length > 0 ? videos : undefined
+    );
 
     return NextResponse.json(result);
   } catch (error: any) {

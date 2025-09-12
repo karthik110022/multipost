@@ -320,11 +320,32 @@ export class SocialMediaService {
     }
   }
 
+  async uploadMedia(accountId: string, file: File): Promise<{ url: string; websocket_url?: string }> {
+    try {
+      const { data: account } = await this.supabase
+        .from('social_accounts')
+        .select('*')
+        .eq('id', accountId)
+        .maybeSingle();
+
+      if (!account || !account.access_token) {
+        throw new Error('No access token found for account');
+      }
+
+      return await this.redditService.uploadMedia(account.access_token, file);
+    } catch (error: any) {
+      console.error('Failed to upload media:', error);
+      throw new Error(`Media upload failed: ${error.message}`);
+    }
+  }
+
   async createPost(
     title: string,
     content: string,
     posts: RedditPostConfig[],
-    userId?: string
+    images?: File[],
+    userId?: string,
+    videos?: File[]
   ): Promise<PostResult[]> {
     const results: PostResult[] = [];
 
@@ -400,7 +421,9 @@ export class SocialMediaService {
               post.subreddit,
               title,
               content,
-              post.flairId || ''
+              post.flairId || '',
+              images,
+              videos
             );
 
             console.log('Successfully posted to Reddit with ID:', platformPostId);

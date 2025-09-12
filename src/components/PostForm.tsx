@@ -7,6 +7,8 @@ import { socialMediaService } from '@/lib/social-media-service';
 import type { SocialAccount } from '@/lib/social-media-service';
 import { useAnalytics } from './AnalyticsProvider';
 import { LoadingButton } from './ui/PageTransition';
+import RichTextEditorWrapper from './RichTextEditorWrapper';
+import { htmlToMarkdown } from '@/lib/markdown-utils';
 
 interface PostFormData {
   content: string;
@@ -18,6 +20,8 @@ interface PostFormData {
     flairId?: string;
   }>;
   scheduledFor?: string;
+  images?: File[];
+  videos?: File[];
 }
 
 interface Props {
@@ -43,7 +47,9 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
     content: '',
     title: '',
     selectedAccounts: [],
-    subreddits: []
+    subreddits: [],
+    images: [],
+    videos: []
   });
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [subredditsByAccount, setSubredditsByAccount] = useState<Record<string, Array<{ name: string; displayName: string }>>>({});
@@ -149,14 +155,48 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
     setPostResults([]);
 
     try {
+      // Convert HTML content to markdown for Reddit
+      const markdownContent = htmlToMarkdown(formData.content);
+      
       const endpoint = isScheduled ? '/api/social/schedule-post' : '/api/social/create-post';
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: formData.content,
+      
+      // Use FormData if we have media files, otherwise use JSON
+      let body: string | FormData;
+      let headers: Record<string, string> = {};
+      
+      const hasMedia = (formData.images && formData.images.length > 0) || 
+                       (formData.videos && formData.videos.length > 0);
+      
+      if (hasMedia) {
+        // Use FormData for media uploads
+        const formDataBody = new FormData();
+        formDataBody.append('content', markdownContent);
+        formDataBody.append('title', formData.title);
+        formDataBody.append('posts', JSON.stringify(formData.subreddits.map(sub => ({
+          accountId: sub.accountId,
+          subreddit: sub.subreddit,
+          flairId: sub.flairId
+        }))));
+        if (formData.scheduledFor) {
+          formDataBody.append('scheduledFor', formData.scheduledFor);
+        }
+        
+        // Combine images and videos into media files
+        const allMedia = [...(formData.images || []), ...(formData.videos || [])];
+        
+        // Append each media file
+        allMedia.forEach((file, index) => {
+          formDataBody.append(`media_${index}`, file);
+        });
+        formDataBody.append('mediaCount', allMedia.length.toString());
+        
+        body = formDataBody;
+        // Don't set Content-Type header - let browser set it with boundary for FormData
+      } else {
+        // Use JSON for text-only posts
+        headers['Content-Type'] = 'application/json';
+        body = JSON.stringify({
+          content: markdownContent,
           title: formData.title,
           posts: formData.subreddits.map(sub => ({
             accountId: sub.accountId,
@@ -164,7 +204,13 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
             flairId: sub.flairId
           })),
           scheduledFor: formData.scheduledFor
-        }),
+        });
+      }
+      
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body,
       });
 
       const results = await response.json();
@@ -227,7 +273,9 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
       title: '',
       selectedAccounts: [],
       subreddits: [],
-      scheduledFor: undefined
+      scheduledFor: undefined,
+      images: [],
+      videos: []
     });
     setSelectedSubreddit(null);
     setSelectedAccountId(null);
@@ -364,12 +412,12 @@ export default function PostForm({ user, isScheduled = false, onPostCreated }: P
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Content
               </label>
-              <textarea
-                value={formData.content}
-                onChange={e => setFormData(prev => ({ ...prev, content: e.target.value }))}
-                className="w-full p-3 border rounded-lg bg-white text-gray-900 border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 hover:border-gray-400"
-                rows={4}
-                required
+              <RichTextEditorWrapper
+                content={formData.content}
+                onChange={(content) => setFormData(prev => ({ ...prev, content }))}
+                onImagesChange={(images) => setFormData(prev => ({ ...prev, images }))}
+                onVideosChange={(videos) => setFormData(prev => ({ ...prev, videos }))}
+                placeholder="Write your post content here..."
               />
             </div>
           </>

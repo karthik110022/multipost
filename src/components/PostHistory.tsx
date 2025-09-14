@@ -80,9 +80,58 @@ function PostHistory() {
             </div>
 
             {/* Post Content */}
-            <div className="whitespace-pre-wrap text-gray-700 mb-6 border-b pb-4">
+            <div className="whitespace-pre-wrap text-gray-700 mb-4">
               {post.content}
             </div>
+
+            {/* Media Display */}
+            {post.media_urls && post.media_urls.length > 0 && (
+              <div className="mb-6 border-t pt-4">
+                <h3 className="text-lg font-medium text-gray-900 mb-3">Media</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {post.media_urls.map((mediaUrl: string, index: number) => {
+                    const isVideo = mediaUrl.includes('v.redd.it');
+                    const mediaKey = `${post.id}-${index}`;
+                    
+                    return (
+                      <div key={mediaKey} className="rounded-lg overflow-hidden bg-gray-100">
+                        {isVideo ? (
+                          <video 
+                            controls 
+                            className="w-full h-48 object-cover"
+                            poster={`${mediaUrl}/DASH_720.mp4`}
+                          >
+                            <source src={`${mediaUrl}/DASH_720.mp4`} type="video/mp4" />
+                            <source src={`${mediaUrl}/DASH_480.mp4`} type="video/mp4" />
+                            Your browser does not support the video tag.
+                          </video>
+                        ) : (
+                          <img 
+                            src={mediaUrl} 
+                            alt={`Media ${index + 1}`}
+                            className="w-full h-48 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                            onClick={() => window.open(mediaUrl, '_blank')}
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = 'none';
+                            }}
+                          />
+                        )}
+                        <div className="p-2 text-xs text-gray-600">
+                          <span className="font-medium">
+                            {isVideo ? 'Video' : 'Image'} {index + 1}
+                          </span>
+                          <span className="mx-2">•</span>
+                          <span>From Reddit</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            
+            <div className="border-b pb-4 mb-6"></div>
             
             {/* Reddit Account Details */}
             <div className="space-y-4">

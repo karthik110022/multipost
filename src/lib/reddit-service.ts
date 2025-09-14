@@ -1,6 +1,6 @@
 import axios, { AxiosError } from 'axios';
 import { env, validateEnv } from '@/config/env';
-import { CloudflareService } from './cloudflare-service';
+import { SupabaseStorageService } from './supabase-storage-service';
 
 class RateLimiter {
   private limits: Map<string, {
@@ -562,87 +562,178 @@ export class RedditService {
     }
   }
 
-  async uploadMedia(accessToken: string, file: File): Promise<{ url: string; websocket_url?: string }> {
+  async uploadMedia(accessToken: string, file: File): Promise<{ url: string; assetId?: string; supabasePath?: string; websocket_url?: string }> {
     const isVideo = file.type.startsWith('video/');
     const mediaType = isVideo ? 'video' : 'image';
     
-    console.log(`Starting ${mediaType} upload...`, { 
+    console.log(`Starting direct Reddit ${mediaType} upload...`, { 
       fileName: file.name, 
       fileSize: file.size, 
       fileType: file.type,
       mediaType 
     });
 
-    // Use Cloudflare hosting service instead of Reddit's broken API
     try {
-      const cloudflareService = new CloudflareService();
+      // Use Reddit's native API for direct upload
+      console.log('Using Reddit native API for media upload...');
       
-      if (isVideo) {
-        // Use Cloudflare Stream for videos
-        const videoUrl = await cloudflareService.uploadVideo(file);
-        
-        console.log('Video uploaded successfully via Cloudflare Stream:', videoUrl);
-        
-        return {
-          url: videoUrl,
-          websocket_url: undefined
-        };
-      } else {
-        // Use Cloudflare Images for images
-        const imageUrl = await cloudflareService.uploadImage(file);
-        
-        console.log('Image uploaded successfully via Cloudflare Images:', imageUrl);
-        
-        return {
-          url: imageUrl,
-          websocket_url: undefined
-        };
-      }
-    } catch (error: any) {
-      console.error(`Error uploading ${mediaType}:`, error);
+      // Step 1: Request upload lease from Reddit - exactly like the working npm package
+      console.log('Requesting media upload lease from Reddit...');
       
-      // Try Reddit's native API as last resort
-      console.log('Attempting Reddit native upload as fallback...');
+      // Map file types exactly like PRAW does it
+      const mimeTypeMap: { [key: string]: string } = {
+        'png': 'image/png',
+        'jpg': 'image/jpeg', 
+        'jpeg': 'image/jpeg',
+        'gif': 'image/gif',
+        'mp4': 'video/mp4',
+        'mov': 'video/quicktime'
+      };
+      
+      // Get file extension and use it for mapping
+      const fileExt = file.name.split('.').pop()?.toLowerCase() || '';
+      const mappedMimeType = mimeTypeMap[fileExt] || 'image/jpeg'; // default to JPEG like the npm package
+      
+      console.log('Request body (exact format):', { filepath: file.name, mimetype: mappedMimeType });
+      
+      // Try different approaches to fix the 500 error
+      console.log('Trying different request formats to fix 500 error...');
+      
+      let leaseResponse;
+      
+      // Approach 1: Try with form data instead of JSON (some APIs prefer this)
       try {
-        // Try Reddit's media upload
-        const leaseResponse = await this.makeApiRequest<any>('/api/media/asset.json', {
+        console.log('Trying approach 1: Form data format');
+        const formData = new URLSearchParams();
+        formData.append('filepath', file.name);
+        formData.append('mimetype', mappedMimeType);
+        
+        leaseResponse = await this.makeApiRequest<any>('/api/media/asset.json', {
           method: 'POST',
-          body: JSON.stringify({
-            filepath: file.name,
-            mimetype: file.type
-          }),
+          body: formData.toString(),
           headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'MultiPost:1.0.0 (by /u/multipost-app)'
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': `bot:${env.NEXT_PUBLIC_REDDIT_CLIENT_ID}:v1.0.0 (by /u/multipost-app)`
           },
           accessToken
         });
+        console.log('Approach 1 succeeded!');
+      } catch (error1: any) {
+        console.log('Approach 1 failed:', error1.message);
+        
+        // Approach 2: Try with different User-Agent format
+        try {
+          console.log('Trying approach 2: Different User-Agent format');
+          leaseResponse = await this.makeApiRequest<any>('/api/media/asset.json', {
+            method: 'POST',
+            body: JSON.stringify({
+              filepath: file.name,
+              mimetype: mappedMimeType
+            }),
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': `MultiPost/1.0.0`
+            },
+            accessToken
+          });
+          console.log('Approach 2 succeeded!');
+        } catch (error2: any) {
+          console.log('Approach 2 failed:', error2.message);
+          
+          // Approach 3: Try with minimal headers (sometimes less is more)
+          try {
+            console.log('Trying approach 3: Minimal headers');
+            leaseResponse = await this.makeApiRequest<any>('/api/media/asset.json', {
+              method: 'POST',
+              body: JSON.stringify({
+                filepath: file.name,
+                mimetype: mappedMimeType
+              }),
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              accessToken
+            });
+            console.log('Approach 3 succeeded!');
+          } catch (error3: any) {
+            console.log('Approach 3 failed:', error3.message);
+            console.log('All approaches failed - this might be a temporary Reddit API issue');
+            throw error3;
+          }
+        }
+      }
+      
+      console.log('Lease response received:', JSON.stringify(leaseResponse, null, 2));
 
-        const uploadData = new FormData();
+      if (!leaseResponse || !leaseResponse.args || !leaseResponse.args.action || !leaseResponse.asset) {
+        console.error('Invalid lease response structure:', leaseResponse);
+        throw new Error('Invalid response from Reddit media API - missing required fields (args.action or asset)');
+      }
+      
+      if (!leaseResponse.args.fields) {
+        console.error('Missing fields in lease response:', leaseResponse.args);
+        throw new Error('Invalid response from Reddit media API - missing upload fields');
+      }
+
+      // Step 2: Upload the file to Reddit's AWS S3 endpoint
+      let s3Url = leaseResponse.args.action;
+      
+      // Fix URL format - Reddit returns URL without protocol
+      if (s3Url.startsWith('//')) {
+        s3Url = 'https:' + s3Url;
+      }
+      
+      console.log('Uploading file to Reddit AWS S3 endpoint:', s3Url);
+      
+      const uploadData = new FormData();
+      
+      // Add all the required fields from the lease response first
+      // The fields array contains objects with name/value properties
+      if (Array.isArray(leaseResponse.args.fields)) {
+        leaseResponse.args.fields.forEach((field: any) => {
+          uploadData.append(field.name, field.value);
+          console.log(`Added field: ${field.name} = ${field.value}`);
+        });
+      } else {
+        // Handle if fields is an object instead of array
         Object.keys(leaseResponse.args.fields).forEach(key => {
           uploadData.append(key, leaseResponse.args.fields[key]);
+          console.log(`Added field: ${key} = ${leaseResponse.args.fields[key]}`);
         });
-        uploadData.append('file', file);
-
-        const uploadResponse = await fetch(leaseResponse.args.action, {
-          method: 'POST',
-          body: uploadData,
-        });
-
-        if (!uploadResponse.ok) {
-          throw new Error(`Upload failed: ${uploadResponse.status}`);
-        }
-
-        const mediaUrl = `https://i.redd.it/${leaseResponse.asset.asset_id}`;
-        return {
-          url: mediaUrl,
-          websocket_url: leaseResponse.asset.websocket_url
-        };
-      } catch (redditError) {
-        console.error('Reddit native upload also failed:', redditError);
-        // Return a fallback indicator
-        return this.uploadMediaFallback(accessToken, file);
       }
+      
+      // Add the file last
+      uploadData.append('file', file);
+      console.log('Added file to FormData:', file.name, file.type, file.size);
+
+      const uploadResponse = await fetch(s3Url, {
+        method: 'POST',
+        body: uploadData,
+        // Don't add custom headers - let browser set Content-Type for multipart/form-data
+      });
+      
+      console.log('Upload response status:', uploadResponse.status, uploadResponse.statusText);
+
+      if (!uploadResponse.ok) {
+        throw new Error(`Reddit upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+      }
+
+      // Return both the asset ID and the full URL for different uses
+      const mediaUrl = isVideo ? 
+        `https://v.redd.it/${leaseResponse.asset.asset_id}` : 
+        `https://i.redd.it/${leaseResponse.asset.asset_id}`;
+        
+      console.log(`${mediaType} uploaded successfully to Reddit:`, mediaUrl);
+      console.log('Asset ID:', leaseResponse.asset.asset_id);
+      
+      return {
+        url: mediaUrl,
+        assetId: leaseResponse.asset.asset_id,
+        websocket_url: leaseResponse.asset.websocket_url
+      };
+    } catch (error: any) {
+      console.error(`Reddit ${mediaType} upload failed:`, error);
+      throw error; // Don't use fallback - let's see if direct upload works
     }
   }
 
@@ -668,7 +759,7 @@ export class RedditService {
     flairId: string,
     images?: File[],
     videos?: File[]
-  ): Promise<string> {
+  ): Promise<{ postId: string; mediaUrls: string[] }> {
     console.log('Starting post submission...', { 
       subreddit, 
       hasFlairId: !!flairId, 
@@ -685,10 +776,11 @@ export class RedditService {
       
       // Handle media uploads if provided (images and videos)
       let uploadedMediaUrls: string[] = [];
+      let uploadedAssetIds: string[] = [];
       const allMediaFiles = [...(images || []), ...(videos || [])];
       
       if (allMediaFiles.length > 0) {
-        console.log('Uploading media files via Cloudflare...');
+        console.log('Uploading media files to Reddit...');
         for (const file of allMediaFiles) {
           try {
             const isVideo = file.type.startsWith('video/');
@@ -696,7 +788,11 @@ export class RedditService {
             
             const uploadResult = await this.uploadMedia(accessToken, file);
             uploadedMediaUrls.push(uploadResult.url);
-            console.log(`Uploaded ${mediaType} via Cloudflare:`, uploadResult.url);
+            if (uploadResult.assetId) {
+              uploadedAssetIds.push(uploadResult.assetId);
+            }
+            console.log(`Uploaded ${mediaType} to Reddit:`, uploadResult.url);
+            console.log(`Asset ID:`, uploadResult.assetId);
           } catch (error: any) {
             console.error(`Failed to upload ${file.type.startsWith('video/') ? 'video' : 'image'}:`, file.name, error);
             throw new Error(`Failed to upload ${file.type.startsWith('video/') ? 'video' : 'image'} ${file.name}: ${error.message}`);
@@ -722,26 +818,78 @@ export class RedditService {
       });
       
       if (validMediaUrls.length > 0) {
-        // For media posts with valid URLs, use 'link' kind with the first media as primary
-        formData.append('kind', 'link');
-        formData.append('url', validMediaUrls[0]);
+        // Check if we have Reddit native assets or Supabase URLs
+        const hasRedditAssets = uploadedAssetIds.length > 0;
+        const hasSupabaseUrls = validMediaUrls.some(url => url.includes('supabase'));
         
-        // Add content as text if provided, append other media URLs
-        let fullContent = content || '';
-        if (validMediaUrls.length > 1) {
-          fullContent += '\n\nAdditional media:\n';
-          validMediaUrls.slice(1).forEach((url, index) => {
-            fullContent += `\n${index + 2}. ${url}`;
-          });
+        if (hasRedditAssets) {
+          // For Reddit native media posts with asset IDs
+          console.log('Creating Reddit native media post with asset IDs:', uploadedAssetIds);
+          
+          if (uploadedAssetIds.length === 1) {
+            // Single media item
+            const isVideo = validMediaUrls[0].includes('v.redd.it');
+            if (isVideo) {
+              // TODO: Video functionality temporarily disabled
+              // Try using 'video' kind instead of 'videogif' and asset_id instead of URL
+              // formData.append('kind', 'video');
+              // formData.append('video_asset_id', uploadedAssetIds[0]); // Use asset ID instead of URL
+              // formData.append('video_poster_url', validMediaUrls[0]); // Keep poster URL
+              throw new Error('Video uploads are temporarily disabled for testing');
+            } else {
+              formData.append('kind', 'image');
+              formData.append('url', validMediaUrls[0]);
+            }
+          } else {
+            // Multiple media items - use gallery
+            formData.append('kind', 'gallery');
+            uploadedAssetIds.forEach((assetId, index) => {
+              formData.append(`items[${index}][media_id]`, assetId);
+              formData.append(`items[${index}][caption]`, '');
+            });
+          }
+        } else {
+          // For Supabase or external URLs, create link posts
+          console.log('Creating link post with external URLs:', validMediaUrls);
+          
+          if (validMediaUrls.length === 1) {
+            // Single link post
+            formData.append('kind', 'link');
+            formData.append('url', validMediaUrls[0]);
+          } else {
+            // Multiple URLs - create text post with links
+            formData.append('kind', 'self');
+            let mediaContent = '\n\n**Media:**\n\n';
+            validMediaUrls.forEach((url, index) => {
+              mediaContent += `${index + 1}. [Media ${index + 1}](${url})\n\n`;
+            });
+            content = (content || '') + mediaContent;
+          }
         }
-        if (fullContent) {
+        
+        // Clean up content by removing media placeholders
+        let fullContent = content || '';
+        fullContent = fullContent.replace(/\[📷 Image: [^\]]+\]/g, '');
+        fullContent = fullContent.replace(/\[📹 Video: [^\]]+\]/g, '');
+        fullContent = fullContent.replace(/\n\s*\n/g, '\n').trim();
+        
+        if (fullContent && !hasRedditAssets) {
+          formData.append('text', fullContent);
+        } else if (fullContent && hasRedditAssets) {
           formData.append('text', fullContent);
         }
       } else {
         // Text post (either no media or all media failed)
         formData.append('kind', 'self');
         
+        // Clean up content by removing media placeholders from rich text editor
         let fullContent = content || '';
+        // Remove image placeholders: [📷 Image: filename]
+        fullContent = fullContent.replace(/\[📷 Image: [^\]]+\]/g, '');
+        // Remove video placeholders: [📹 Video: filename]
+        fullContent = fullContent.replace(/\[📹 Video: [^\]]+\]/g, '');
+        // Clean up extra whitespace
+        fullContent = fullContent.replace(/\n\s*\n/g, '\n').trim();
         
         // Don't add fallback text that triggers Reddit's spam filters
         // Just post the content without mentioning failed uploads
@@ -788,7 +936,11 @@ export class RedditService {
       const postId = fullName.replace('t3_', '');
       console.log('Successfully created Reddit post with ID:', postId);
 
-      return postId;
+      // Return both post ID and media URLs for storage in history
+      return {
+        postId,
+        mediaUrls: uploadedMediaUrls.filter(url => !url.startsWith('FALLBACK_MEDIA:') && !url.startsWith('FALLBACK_IMAGE:'))
+      };
     } catch (error: any) {
       console.error('Error in submitPost:', error);
       throw error;

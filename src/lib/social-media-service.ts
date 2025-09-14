@@ -416,7 +416,7 @@ export class SocialMediaService {
           // Attempt to post to Reddit
           try {
             console.log('Attempting to post to Reddit...');
-            const platformPostId = await this.redditService.submitPost(
+            const postResult = await this.redditService.submitPost(
               account.accessToken,
               post.subreddit,
               title,
@@ -426,13 +426,15 @@ export class SocialMediaService {
               videos
             );
 
-            console.log('Successfully posted to Reddit with ID:', platformPostId);
+            console.log('Successfully posted to Reddit with ID:', postResult.postId);
+            console.log('Media URLs:', postResult.mediaUrls);
             
             try {
               console.log('Attempting to update post status to published...', {
                 platformRecordId: platformRecord.id,
-                platformPostId,
-                currentStatus: platformRecord.status
+                platformPostId: postResult.postId,
+                currentStatus: platformRecord.status,
+                mediaUrls: postResult.mediaUrls
               });
 
               // Prepare update data
@@ -440,7 +442,7 @@ export class SocialMediaService {
                 id: platformRecord.id, // Include id for upsert
                 post_id: platformRecord.post_id, // Include all required fields
                 social_account_id: platformRecord.social_account_id,
-                platform_post_id: platformPostId,
+                platform_post_id: postResult.postId,
                 status: 'published',
                 published_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
@@ -486,21 +488,41 @@ export class SocialMediaService {
                 throw new Error('Failed to update platform record - record not found');
               }
 
-              if (verifiedRecord.status !== 'published' || verifiedRecord.platform_post_id !== platformPostId) {
+              if (verifiedRecord.status !== 'published' || verifiedRecord.platform_post_id !== postResult.postId) {
                 console.error('Update verification failed:', {
                   record: verifiedRecord,
                   expectedStatus: 'published',
-                  expectedPostId: platformPostId
+                  expectedPostId: postResult.postId
                 });
                 throw new Error('Update verification failed - record not updated correctly');
               }
 
               console.log('Successfully updated post status:', verifiedRecord);
 
+              // Update the main posts table with media URLs if we have them
+              if (postResult.mediaUrls.length > 0) {
+                console.log('Updating posts table with media URLs:', postResult.mediaUrls);
+                
+                const { error: postUpdateError } = await this.supabase
+                  .from('posts')
+                  .update({
+                    media_urls: postResult.mediaUrls,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', postRecord.id);
+
+                if (postUpdateError) {
+                  console.error('Error updating posts table with media URLs:', postUpdateError);
+                  // Don't fail the whole process, but log the error
+                } else {
+                  console.log('Successfully updated posts table with media URLs');
+                }
+              }
+
               // Add to results
               results.push({
                 success: true,
-                platformPostId,
+                platformPostId: postResult.postId,
                 accountId: post.accountId,
                 subreddit: post.subreddit,
                 id: postRecord.id,

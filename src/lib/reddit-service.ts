@@ -599,7 +599,7 @@ export class RedditService {
       // Try different approaches to fix the 500 error
       console.log('Trying different request formats to fix 500 error...');
       
-      let leaseResponse;
+      let leaseResponse: any;
       
       // Approach 1: Try with form data instead of JSON (some APIs prefer this)
       try {

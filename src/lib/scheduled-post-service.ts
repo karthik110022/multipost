@@ -91,7 +91,9 @@ export class ScheduledPostService {
                 subreddit: post.subreddit || '',
                 flairId: post.flair_id || undefined
               }],
-              post.user_id
+              undefined, // images
+              post.user_id, // userId
+              undefined  // videos
             );
 
             // Update post status based on result

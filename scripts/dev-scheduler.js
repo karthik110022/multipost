@@ -21,15 +21,27 @@ cron.schedule('*/2 * * * *', async () => {
   try {
     console.log('Running scheduled post check...');
     console.log('Using CRON_SECRET:', process.env.CRON_SECRET ? 'Present' : 'Missing');
+    
     const response = await fetch(
-      `http://localhost:3000/api/cron/publish-scheduled?secret=${encodeURIComponent(process.env.CRON_SECRET)}`,
+      'http://localhost:3000/api/cron/process-scheduled',
       {
-        method: 'GET',
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.CRON_SECRET}`,
+          'X-Forwarded-For': '116.203.134.67', // Required IP for cron validation
+          'Content-Type': 'application/json'
+        }
       }
     );
 
     const data = await response.json();
     console.log('Scheduler response:', data);
+    
+    if (data.processedCount && data.processedCount > 0) {
+      console.log(`✅ Successfully processed ${data.processedCount} scheduled posts`);
+    } else if (data.message) {
+      console.log(`ℹ️  ${data.message}`);
+    }
   } catch (error) {
     console.error('Error running scheduler:', error);
   }

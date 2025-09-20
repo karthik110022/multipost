@@ -86,8 +86,10 @@ interface SubredditActivityData {
 export class SocialMediaService {
   private redditService: RedditService;
   private supabase;
+  private useServiceRole: boolean;
 
   constructor(supabase?: any, useServiceRole: boolean = false) {
+    this.useServiceRole = useServiceRole;
     this.redditService = new RedditService();
     if (useServiceRole) {
       this.supabase = supabase || createClient(
@@ -352,11 +354,13 @@ export class SocialMediaService {
     try {
       // Get the user ID from parameter or auth
       let actualUserId = userId;
-      if (!actualUserId) {
+      if (!actualUserId && !this.useServiceRole) {
         const { data: { user }, error: userError } = await this.supabase.auth.getUser();
         if (userError) throw userError;
         if (!user) throw new Error('User not authenticated');
         actualUserId = user.id;
+      } else if (!actualUserId && this.useServiceRole) {
+        throw new Error('User ID is required when using service role');
       }
 
       // Create the main post record

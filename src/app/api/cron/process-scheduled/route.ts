@@ -52,7 +52,9 @@ async function processBatch(supabase: any, posts: any[], batchSize: number = 5) 
             subreddit: post.subreddit || '',
             flairId: post.flair_id || undefined
           }],
-          post.user_id
+          undefined, // images
+          post.user_id, // userId
+          undefined  // videos
         );
 
         console.log('Post creation result:', result);

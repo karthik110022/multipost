@@ -8,4 +8,4 @@
   external_node_modules = ["@supabase/supabase-js"]
 
 [functions."publish-scheduled-background"]
-  schedule = "@hourly" 
+  schedule = "*/3 * * * *" 
